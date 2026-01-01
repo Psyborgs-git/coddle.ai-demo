@@ -1,0 +1,67 @@
+# macOS
+.DS_Store
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+package-lock.json
+yarn.lock
+.pnpm-debug.log
+
+# Build outputs
+/dist/
+build/
+.out/
+.next/
+/.parcel-cache/
+/.vercel/
+/.netlify/
+/.cache/
+
+# Environment files
+.env
+.env.*.local
+.env.local
+
+# Logs
+logs/
+*.log
+yarn-error.log
+npm-debug.log
+
+# Test coverage
+coverage/
+coverage/*
+.nyc_output/
+
+# Editor directories and files
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# Python
+venv/
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Other
+*.sqlite3
+*.sqlite
+*.db
+Thumbs.db
+
+# Ignore local IDE and OS files
+*.swp
+*.swo
+
+# Optional: OS-specific
+.DS_Store
+
+# End of .gitignore
