@@ -9,7 +9,7 @@ import { generateSchedule } from '../utils/schedule';
 import { generateCoachTips } from '../utils/coach';
 import { DEFAULT_LEARNER_STATE } from '../constants/baselines';
 import { getCurrentTimezone, getDSTOffset } from '../utils/date';
-import { differenceInMonths, parseISO, subDays, addMinutes } from 'date-fns';
+import { differenceInMonths, parseISO, subDays, addMinutes, startOfDay } from 'date-fns';
 
 // Avatar colors for profiles
 export const PROFILE_COLORS = [
@@ -37,6 +37,7 @@ interface StoreState {
   isTimerRunning: boolean;
   currentSessionStartISO: string | null;
   timezone: string;
+  dstOverride: 'auto' | 'on' | 'off';
   isInitialized: boolean;
 
   // Profile management
@@ -49,6 +50,9 @@ interface StoreState {
   // Theme
   themeMode: 'system' | 'light' | 'dark';
   setThemeMode: (mode: 'system' | 'light' | 'dark') => Promise<void>;
+  
+  // Timezone & DST override
+  setTimezoneWithDst: (timezone: string, dstOverride: 'auto' | 'on' | 'off') => Promise<void>;
   
   loadData: () => Promise<void>;
   
@@ -79,6 +83,7 @@ export const useStore = create<StoreState>((set, get) => ({
   isTimerRunning: false,
   currentSessionStartISO: null,
   timezone: getCurrentTimezone(),
+  dstOverride: 'auto' as 'auto' | 'on' | 'off',
   isInitialized: false,
   themeMode: 'system',
 
@@ -93,6 +98,18 @@ export const useStore = create<StoreState>((set, get) => ({
       await get().addProfile(profile);
     }
     await get().switchProfile(profile.id);
+  },
+
+  // Timezone + DST setter
+  setTimezoneWithDst: async (timezone, dstOverride) => {
+    try {
+      await db.saveSetting('timezone', timezone);
+      await db.saveSetting('dstOverride', dstOverride);
+      set({ timezone, dstOverride });
+    } catch (e) {
+      console.error('Failed to save timezone/dst settings:', e);
+      throw e;
+    }
   },
 
   addProfile: async (profile) => {
@@ -191,8 +208,12 @@ export const useStore = create<StoreState>((set, get) => ({
       await db.initialize();
       await StorageService.initialize();
       
-      const timezone = getCurrentTimezone();
-      set({ timezone, isInitialized: true });
+      // Read saved timezone & DST override if present
+      const savedTz = await db.getSetting('timezone');
+      const savedDst = await db.getSetting('dstOverride');
+      const timezone = savedTz || getCurrentTimezone();
+      const dstOverride = (savedDst as any) || 'auto';
+      set({ timezone, dstOverride, isInitialized: true });
       
       // Try loading from database first
       let profiles = await db.getProfiles();
@@ -382,49 +403,104 @@ export const useStore = create<StoreState>((set, get) => ({
       const now = new Date();
       const dstOffset = getDSTOffset();
       
-      // Generate 90 days of data with realistic sleep patterns
-      for (let i = 0; i < 90; i++) {
-          const dayStart = subDays(now, i);
+      // Generate 30 days of data with realistic baby sleep patterns
+      // Baby sleep totals: 12-15 hours/day (newborn), decreasing with age
+      for (let i = 0; i < 30; i++) {
+          const dayStart = startOfDay(subDays(now, i));
           const dayOfWeek = dayStart.getDay();
           const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
           
-          // 2-4 naps per day depending on day (weekends more variable)
+          // Realistic baby sleep pattern (3-4 naps + night sleep = 12-15h total)
           const napCount = isWeekend ? (2 + Math.floor(Math.random() * 2)) : 3;
-          for (let j = 0; j < napCount; j++) {
-              const baseStartMinutes = 600 + (j * 180); // 10am, 1pm, 4pm etc
-              const variance = Math.random() * 60 - 30; // ±30 min variance
-              const start = addMinutes(dayStart, baseStartMinutes + variance);
-              const duration = 45 + (Math.random() * 45); // 45-90 min naps
-              const end = addMinutes(start, duration);
+          
+          // Morning nap: 9am-10:30am (1-1.5h)
+          if (napCount >= 1) {
+              const napStart = addMinutes(dayStart, 540 + (Math.random() * 30)); // 9am ±15min
+              const napDuration = 60 + (Math.random() * 30); // 60-90min
+              const napEnd = addMinutes(napStart, napDuration);
               
-              const session = {
+              sessions.push({
                   id: uuidv4(),
                   profileId: activeProfileId || undefined,
-                  startISO: start.toISOString(),
-                  endISO: end.toISOString(),
+                  startISO: napStart.toISOString(),
+                  endISO: napEnd.toISOString(),
                   source: 'manual' as const,
                   quality: (3 + Math.floor(Math.random() * 3)) as (1 | 2 | 3 | 4 | 5),
                   updatedAtISO: new Date().toISOString()
-              };
-              sessions.push(session);
-              await db.saveSession(session, timezone, dstOffset);
+              });
           }
-          // Night sleep (7pm-6am with some variance)
-          const nightVariance = Math.random() * 120 - 60; // ±1 hour
-          const nightStart = addMinutes(dayStart, 1140 + nightVariance); // ~7pm
-          const nightDuration = 600 + (Math.random() * 120); // 10-12 hours
-          const nightEnd = addMinutes(nightStart, nightDuration);
-          const nightSession = {
+          
+          // Midday nap: 12:30pm-2pm (1-1.5h)
+          if (napCount >= 2) {
+              const napStart = addMinutes(dayStart, 750 + (Math.random() * 30)); // 12:30pm ±15min
+              const napDuration = 60 + (Math.random() * 30); // 60-90min
+              const napEnd = addMinutes(napStart, napDuration);
+              
+              sessions.push({
                   id: uuidv4(),
                   profileId: activeProfileId || undefined,
-                  startISO: nightStart.toISOString(),
-                  endISO: nightEnd.toISOString(),
+                  startISO: napStart.toISOString(),
+                  endISO: napEnd.toISOString(),
                   source: 'manual' as const,
-                  quality: (4 + Math.floor(Math.random() * 2)) as (1 | 2 | 3 | 4 | 5),
+                  quality: (3 + Math.floor(Math.random() * 3)) as (1 | 2 | 3 | 4 | 5),
                   updatedAtISO: new Date().toISOString()
-              };
-          sessions.push(nightSession);
-          await db.saveSession(nightSession, timezone, dstOffset);
+              });
+          }
+          
+          // Afternoon nap: 3:30pm-5pm (0.5-1.5h, often shorter)
+          if (napCount >= 3) {
+              const napStart = addMinutes(dayStart, 930 + (Math.random() * 30)); // 3:30pm ±15min
+              const napDuration = 30 + (Math.random() * 60); // 30-90min (variable)
+              const napEnd = addMinutes(napStart, napDuration);
+              
+              sessions.push({
+                  id: uuidv4(),
+                  profileId: activeProfileId || undefined,
+                  startISO: napStart.toISOString(),
+                  endISO: napEnd.toISOString(),
+                  source: 'manual' as const,
+                  quality: (2 + Math.floor(Math.random() * 3)) as (1 | 2 | 3 | 4 | 5),
+                  updatedAtISO: new Date().toISOString()
+              });
+          }
+          
+          // Late afternoon catnap: 5pm-5:30pm (only on some days, 20-40min)
+          if (napCount >= 4 && Math.random() > 0.5) {
+              const napStart = addMinutes(dayStart, 1020 + (Math.random() * 20)); // 5pm ±10min
+              const napDuration = 20 + (Math.random() * 20); // 20-40min
+              const napEnd = addMinutes(napStart, napDuration);
+              
+              sessions.push({
+                  id: uuidv4(),
+                  profileId: activeProfileId || undefined,
+                  startISO: napStart.toISOString(),
+                  endISO: napEnd.toISOString(),
+                  source: 'manual' as const,
+                  quality: (2 + Math.floor(Math.random() * 2)) as (1 | 2 | 3 | 4 | 5),
+                  updatedAtISO: new Date().toISOString()
+              });
+          }
+          
+          // Night sleep: 7pm-6am (10-11 hours with some variance)
+          const nightVariance = Math.random() * 60 - 30; // ±30min
+          const nightStart = addMinutes(dayStart, 1140 + nightVariance); // ~7pm ±30min
+          const nightDuration = 600 + (Math.random() * 60); // 10-11 hours
+          const nightEnd = addMinutes(nightStart, nightDuration);
+          
+          sessions.push({
+              id: uuidv4(),
+              profileId: activeProfileId || undefined,
+              startISO: nightStart.toISOString(),
+              endISO: nightEnd.toISOString(),
+              source: 'manual' as const,
+              quality: (4 + Math.floor(Math.random() * 2)) as (1 | 2 | 3 | 4 | 5),
+              updatedAtISO: new Date().toISOString()
+          });
+      }
+      
+      // Save all sessions to database and store
+      for (const session of sessions) {
+          await db.saveSession(session, timezone, dstOffset);
       }
       
       const { addSession } = get();

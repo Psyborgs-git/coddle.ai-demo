@@ -75,7 +75,7 @@ export const CoachScreen = () => {
   return (
     <Box flex={1} backgroundColor="mainBackground">
       <ScrollView 
-        contentContainerStyle={[styles.container, { paddingTop: insets.top + 20, paddingBottom: 120 }]}
+        contentContainerStyle={[styles.container, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 120 }]}
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}

@@ -1,5 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 import { BabyProfile, SleepSession, LearnerState, ScheduleBlock } from '../types';
+import { safeParseISO } from '../utils/date';
 
 const DB_NAME = 'coddle.db';
 const DB_VERSION = 1;
@@ -38,6 +39,8 @@ export class DatabaseService {
 
     if (currentVersion < 1) {
       await this.migrateToV1();
+      // After migrating, attempt to clean any legacy or invalid notification_log rows
+      await this.cleanInvalidNotificationLogs();
     }
 
     // Set version
@@ -102,6 +105,11 @@ export class DatabaseService {
         status TEXT NOT NULL,
         createdAtISO TEXT NOT NULL,
         canceledAtISO TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
       );
 
       CREATE INDEX IF NOT EXISTS idx_sessions_start ON sessions(startISO);
@@ -260,6 +268,25 @@ export class DatabaseService {
     status: 'scheduled' | 'canceled' | 'delivered';
   }): Promise<void> {
     if (!this.db) throw new Error('Database not initialized');
+
+    // Validate the log object to avoid storing invalid or random data
+    const allowedStatuses = ['scheduled', 'canceled', 'delivered'];
+    if (!log || typeof log.id !== 'string' || !log.id.trim()) {
+      console.warn('Invalid notification log attempted (missing id)', log);
+      throw new Error('Invalid notification log: missing id');
+    }
+    if (!log.title || typeof log.title !== 'string' || !log.title.trim()) {
+      console.warn('Invalid notification log attempted (missing title)', log);
+      throw new Error('Invalid notification log: missing title');
+    }
+    if (!log.scheduledForISO || !safeParseISO(log.scheduledForISO)) {
+      console.warn('Invalid notification log attempted (invalid scheduledForISO)', log);
+      throw new Error('Invalid notification log: invalid scheduledForISO');
+    }
+    if (!allowedStatuses.includes(log.status)) {
+      console.warn('Invalid notification log attempted (invalid status)', log);
+      throw new Error('Invalid notification log: invalid status');
+    }
     
     await this.db.runAsync(
       `INSERT OR REPLACE INTO notification_log 
@@ -268,8 +295,8 @@ export class DatabaseService {
       [
         log.id,
         log.scheduleBlockId || null,
-        log.title,
-        log.body,
+        log.title.trim(),
+        log.body || null,
         log.scheduledForISO,
         log.notificationId || null,
         log.status,
@@ -293,7 +320,18 @@ export class DatabaseService {
     if (!this.db) throw new Error('Database not initialized');
     
     const rows = await this.db.getAllAsync<any>('SELECT * FROM notification_log ORDER BY scheduledForISO DESC LIMIT 100');
-    return rows.map(row => ({
+    // Filter out any rows that do not look like valid notification entries
+    const filtered = rows.filter(row => {
+      if (!row) return false;
+      if (!row.id || typeof row.id !== 'string') return false;
+      if (!row.title || typeof row.title !== 'string' || !row.title.trim()) return false;
+      if (!row.scheduledForISO || !safeParseISO(row.scheduledForISO)) return false;
+      const allowed = ['scheduled', 'canceled', 'delivered'];
+      if (!allowed.includes(row.status)) return false;
+      return true;
+    });
+
+    return filtered.map(row => ({
       id: row.id,
       scheduleBlockId: row.scheduleBlockId || undefined,
       title: row.title,
@@ -309,6 +347,34 @@ export class DatabaseService {
   async clearOldNotificationLogs(beforeISO: string): Promise<void> {
     if (!this.db) throw new Error('Database not initialized');
     await this.db.runAsync('DELETE FROM notification_log WHERE scheduledForISO < ?', [beforeISO]);
+  }
+
+  // Remove invalid or malformed notification log rows (for migration/cleanup)
+  private async cleanInvalidNotificationLogs(): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    // Remove rows where title/scheduledForISO are missing/empty or status is not one of allowed values
+    await this.db.runAsync(
+      `DELETE FROM notification_log
+       WHERE title IS NULL OR title = ''
+         OR scheduledForISO IS NULL OR scheduledForISO = ''
+         OR status NOT IN ('scheduled','canceled','delivered')`
+    );
+  }
+
+  // Settings methods
+  async saveSetting(key: string, value: string): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+    await this.db.runAsync(
+      'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
+      [key, value]
+    );
+  }
+
+  async getSetting(key: string): Promise<string | null> {
+    if (!this.db) throw new Error('Database not initialized');
+    const row = await this.db.getFirstAsync<{ value: string }>('SELECT value FROM settings WHERE key = ?', [key]);
+    return row ? row.value : null;
   }
 
   // Migration helper - export AsyncStorage data

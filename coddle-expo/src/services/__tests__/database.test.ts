@@ -18,6 +18,22 @@ describe('DatabaseService', () => {
       const instance2 = DatabaseService.getInstance();
       expect(instance1).toBe(instance2);
     });
+
+    it('cleans invalid notification rows during migration', async () => {
+      // Ensure initialize runs migrations and cleanup
+      const instance = DatabaseService.getInstance();
+      await instance.initialize();
+
+      const openDBMock = require('expo-sqlite').openDatabaseAsync as jest.Mock;
+      expect(openDBMock).toBeTruthy();
+      // The mock returns a Promise (openDatabaseAsync is async) - await the promise to get the db handle
+      const dbHandle = await openDBMock.mock.results[0].value;
+
+      // runAsync should have been called at least once with the cleanup SQL
+      const sqlCalls = dbHandle.runAsync.mock.calls.map((c: any) => c[0]);
+      const found = sqlCalls.some((sql: any) => typeof sql === 'string' && sql.includes('DELETE FROM notification_log'));
+      expect(found).toBe(true);
+    });
   });
 
   describe('Data Types', () => {

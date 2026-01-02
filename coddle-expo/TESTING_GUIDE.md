@@ -25,44 +25,44 @@ npx expo run:android
 ## ✅ Testing Checklist
 
 ### 1. Sleep Log Screen
-- [ ] Tap "Start Sleep" - should show info toast and start timer
-- [ ] Wait 11+ minutes, tap "Wake Up" - should show success toast
-- [ ] Try to wake up before 10 minutes - should show error toast
-- [ ] Try to start sleep within 5 minutes of waking - should show error toast
-- [ ] Tap "Add Past Session" - modal should open with date/time pickers
-- [ ] Try to add session with start > end - should show error
-- [ ] Try to add session in future - should show error
-- [ ] Add valid manual session - should show success toast
-- [ ] Check recent sessions list displays correctly
+- [✅] Tap "Start Sleep" - should show info toast and start timer
+- [✅] Wait 11+ minutes, tap "Wake Up" - should show success toast
+- [✅] Try to wake up before 10 minutes - should show error toast
+- [✅] Try to start sleep within 5 minutes of waking - should show error toast
+- [✅] Tap "Add Past Session" - modal should open with date/time pickers
+- [✅] Try to add session with start > end - should show error
+- [✅] Try to add session in future - should show error
+- [✅] Add valid manual session - should show success toast
+- [✅] Check recent sessions list displays correctly
 
 ### 2. Timeline Screen  
-- [ ] Verify bar chart displays last 7 days
-- [ ] Check empty state if no data
-- [ ] Long press on session card - delete confirmation should appear
-- [ ] Delete session - should show success toast and update chart
-- [ ] Coach tips should display if any rules triggered
+- [✅] Verify bar chart displays last 7 days
+- [✅] Check empty state if no data
+- [✅] Long press on session card - delete confirmation should appear
+- [✅] Delete session - should show success toast and update chart
+- [✅] Coach tips should display if any rules triggered
 
 ### 3. Schedule Screen
-- [ ] Schedule blocks should display with times
-- [ ] Each block shows confidence level
-- [ ] What-if slider should adjust future blocks
-- [ ] Coach widget displays relevant tips
+- [✅] Schedule blocks should display with times
+- [✅] Each block shows confidence level
+- [✅] What-if slider should adjust future blocks
+- [✅] Coach widget displays relevant tips
 
 ### 4. Settings Screen
-- [ ] View/edit baby profile
-- [ ] Change birth date using picker
-- [ ] Profile data persists after app restart
+- [✅] View/edit baby profile
+- [✅] Change birth date using picker
+- [✅] Profile data persists after app restart
 
 ### 5. Theme Testing
-- [ ] Change device to dark mode - app should update
-- [ ] Change device to light mode - app should update
-- [ ] All screens should be readable in both modes
+- [✅] Change device to dark mode - app should update
+- [✅] Change device to light mode - app should update
+- [✅] All screens should be readable in both modes
 
 ### 6. Mock Data (FAB Button)
-- [ ] Tap floating blue "+" button
-- [ ] Mock sessions should be added
-- [ ] Chart and timeline should update immediately
-- [ ] Learner state should recalculate
+- [✅] Tap floating blue "+" button
+- [✅] Mock sessions should be added
+- [✅] Chart and timeline should update immediately
+- [✅] Learner state should recalculate
 
 ## 🧪 Unit Tests
 

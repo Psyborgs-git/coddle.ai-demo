@@ -49,7 +49,6 @@ export default function App() {
   const loadData = useStore(state => state.loadData);
   const isInitialized = useStore(state => state.isInitialized);
   const themeMode = useStore(state => state.themeMode);
-  const setThemeMode = useStore(state => state.setThemeMode);
   const systemScheme = useColorScheme();
   const [isLoading, setIsLoading] = useState(true);
 
@@ -87,11 +86,6 @@ export default function App() {
   };
 
   const effectiveIsDark = themeMode === 'dark' || (themeMode === 'system' && systemScheme === 'dark');
-
-  const handleThemeToggle = () => {
-    const next = themeMode === 'dark' ? 'light' : 'dark';
-    setThemeMode(next);
-  };
 
   if (isLoading) {
     return (

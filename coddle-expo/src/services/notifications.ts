@@ -67,6 +67,87 @@ export const NotificationService = {
     }
   },
 
+  async scheduleNotification(params: {
+    title: string;
+    body: string;
+    scheduledForISO: string;
+    scheduleBlockId?: string;
+  }) {
+    const Notifications = await getNotificationsModule();
+    const triggerDate = safeParseISO(params.scheduledForISO);
+    if (!triggerDate) return;
+    
+    const seconds = differenceInSeconds(triggerDate, new Date());
+    if (seconds <= 0) return;
+
+    let notificationId: string | undefined;
+    if (Notifications) {
+      try {
+        notificationId = await Notifications.scheduleNotificationAsync({
+          content: { title: params.title, body: params.body, data: { scheduleBlockId: params.scheduleBlockId } },
+          trigger: {
+            type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+            seconds,
+            repeats: false,
+          } as any,
+        });
+      } catch (e) {
+        console.warn('Failed to schedule notification:', e);
+      }
+    }
+
+    const logEntry = {
+      id: uuidv4(),
+      scheduleBlockId: params.scheduleBlockId,
+      title: params.title,
+      body: params.body,
+      scheduledForISO: params.scheduledForISO,
+      notificationId,
+      status: 'scheduled' as const,
+    };
+
+    try {
+      await db.logNotification(logEntry);
+    } catch (e) {
+      console.error('Failed to write notification log:', e);
+      // Do not throw — scheduling succeeded; surface a warning to the UI consumer
+      return { success: false, error: e } as any;
+    }
+
+    return { success: true, log: logEntry } as any;
+  },
+
+  async cancelNotification(notificationId: string) {
+    const Notifications = await getNotificationsModule();
+    
+    // Update db status
+    const logs = await db.getNotificationLogs();
+    const log = logs.find(n => n.notificationId === notificationId);
+    if (log) {
+      try {
+        await db.logNotification({
+          id: log.id,
+          scheduleBlockId: log.scheduleBlockId,
+          title: log.title,
+          body: log.body,
+          scheduledForISO: log.scheduledForISO,
+          notificationId: log.notificationId,
+          status: 'canceled',
+        });
+      } catch (e) {
+        console.error('Failed to update notification log to canceled:', e);
+      }
+    }
+
+    if (Notifications) {
+      try {
+        await Notifications.cancelScheduledNotificationAsync(notificationId);
+      } catch (e) {
+        console.warn('Failed to cancel notification:', e);
+      }
+    }
+  },
+
   async scheduleNotifications(schedule: ScheduleBlock[]) {
     const Notifications = await getNotificationsModule();
     
@@ -112,15 +193,19 @@ export const NotificationService = {
         }
 
         // Save to database
-        await db.logNotification({
-          id: logId,
-          scheduleBlockId: block.id,
-          title,
-          body,
-          scheduledForISO: block.startISO,
-          notificationId,
-          status: 'scheduled',
-        });
+        try {
+          await db.logNotification({
+            id: logId,
+            scheduleBlockId: block.id,
+            title,
+            body,
+            scheduledForISO: block.startISO,
+            notificationId,
+            status: 'scheduled',
+          });
+        } catch (e) {
+          console.error('Failed to log scheduled notification:', e);
+        }
       }
     }
 
@@ -184,7 +269,18 @@ export const NotificationService = {
 
   async getNotificationLog(): Promise<NotificationLogEntry[]> {
     const logs = await db.getNotificationLogs();
-    return logs.map(log => ({
+    // Defensive filtering in case DB contains unexpected rows (e.g., from migrations or bad writes)
+    const allowed = ['scheduled', 'canceled', 'delivered'];
+    const filtered = logs.filter(log => {
+      if (!log) return false;
+      if (!log.id || typeof log.id !== 'string') return false;
+      if (!log.title || typeof log.title !== 'string' || !log.title.trim()) return false;
+      if (!log.scheduledForISO || !safeParseISO(log.scheduledForISO)) return false;
+      if (!allowed.includes(log.status)) return false;
+      return true;
+    });
+
+    return filtered.map(log => ({
       ...log,
       status: log.status as 'scheduled' | 'canceled' | 'delivered'
     }));
@@ -211,7 +307,7 @@ export const NotificationService = {
     const Notifications = await getNotificationsModule();
     if (!Notifications) return () => {};
 
-    const subscription = Notifications.addNotificationReceivedListener(async notification => {
+    const subscription = Notifications.addNotificationReceivedListener(async (notification: any) => {
       const { title, body } = notification.request.content;
       const id = notification.request.identifier;
       
@@ -219,15 +315,19 @@ export const NotificationService = {
       const logs = await db.getNotificationLogs();
       const log = logs.find(n => n.notificationId === id);
       if (log) {
-        await db.logNotification({
-          id: log.id,
-          scheduleBlockId: log.scheduleBlockId,
-          title: log.title,
-          body: log.body,
-          scheduledForISO: log.scheduledForISO,
-          notificationId: id,
-          status: 'delivered',
-        });
+        try {
+          await db.logNotification({
+            id: log.id,
+            scheduleBlockId: log.scheduleBlockId,
+            title: log.title,
+            body: log.body,
+            scheduledForISO: log.scheduledForISO,
+            notificationId: id,
+            status: 'delivered',
+          });
+        } catch (e) {
+          console.error('Failed to mark notification as delivered:', e);
+        }
       }
 
       if (title && body) {

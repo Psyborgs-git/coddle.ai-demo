@@ -1,371 +1,718 @@
-import React, { useState } from 'react';
-import { View, StyleSheet, Pressable, ScrollView } from 'react-native';
-import { Box, Text } from './index';
-import { useTheme } from '@shopify/restyle';
-import { Theme } from '../../theme';
-import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
+import React, { useMemo, useState } from "react";
+import {
+	View,
+	ScrollView,
+	Text,
+	useWindowDimensions,
+	TouchableOpacity,
+	Animated,
+} from "react-native";
+import type { ViewStyle } from "react-native";
+import {
+	VictoryChart,
+	VictoryBar,
+	VictoryArea,
+	VictoryAxis,
+	VictoryLabel,
+	VictoryTheme,
+	VictoryTooltip,
+	VictoryVoronoiContainer,
+} from "victory-native";
+import { useTheme } from "@shopify/restyle";
+import ChartCard from "./ChartCard";
 
-interface ChartDataPoint {
-  label: string;
-  value: number;
-  date?: Date;
+export type DateRangeOption = "7d" | "14d" | "28d" | "90d";
+
+interface ChartData {
+	x: string;
+	y: number;
 }
 
 interface SimpleBarChartProps {
-  data: ChartDataPoint[];
-  height?: number;
-  color?: string;
-  maxValue?: number;
-  title?: string;
-  unit?: string;
+	data: ChartData[];
+	title?: string;
+	yAxisLabel?: string;
+	color?: string;
+	height?: number;
+	interactive?: boolean;
 }
+
+interface SimpleLineChartProps {
+	data: ChartData[];
+	title?: string;
+	yAxisLabel?: string;
+	color?: string;
+	height?: number;
+	interactive?: boolean;
+}
+
+interface AreaChartProps {
+	data: ChartData[];
+	title?: string;
+	yAxisLabel?: string;
+	color?: string;
+	height?: number;
+	interactive?: boolean;
+}
+
+// Modern gradient colors
+const GRADIENT_COLORS = {
+	primary: "#6366F1", // Indigo
+	success: "#10B981", // Emerald
+	accent: "#8B5CF6", // Violet
+	highlight: "#F59E0B", // Amber
+};
+
+// Modern chart styling theme
+const modernChartTheme = {
+	...VictoryTheme.clean,
+	axis: {
+		...VictoryTheme.clean.axis,
+		style: {
+			axis: {
+				stroke: "#E5E7EB",
+				strokeWidth: 1.5,
+			},
+			axisLabel: {
+				fontSize: 12,
+				fontWeight: "600",
+				fill: "#6B7280",
+				padding: 12,
+			},
+			grid: {
+				stroke: "#F3F4F6",
+				strokeWidth: 1,
+				strokeDasharray: "0",
+			},
+			ticks: {
+				stroke: "#D1D5DB",
+				size: 5,
+				strokeWidth: 1.5,
+			},
+			tickLabels: {
+				fontSize: 11,
+				fill: "#9CA3AF",
+				padding: 6,
+				fontWeight: "500",
+			},
+		},
+	},
+	dependentAxis: {
+		style: {
+			axis: {
+				stroke: "#E5E7EB",
+				strokeWidth: 1.5,
+			},
+			axisLabel: {
+				fontSize: 12,
+				fontWeight: "600",
+				fill: "#6B7280",
+				padding: 12,
+			},
+			grid: {
+				stroke: "#F3F4F6",
+				strokeWidth: 1,
+			},
+			ticks: {
+				stroke: "#D1D5DB",
+				size: 5,
+				strokeWidth: 1.5,
+			},
+			tickLabels: {
+				fontSize: 11,
+				fill: "#9CA3AF",
+				padding: 6,
+				fontWeight: "500",
+			},
+		},
+	},
+};
+
+// Shared chart constants and card styling to keep charts consistent
+const LEFT_AXIS_WIDTH = 80;
+const MIN_POINT_SPACING = 28;
+const DEFAULT_CHART_HEIGHT = 280;
 
 export const SimpleBarChart: React.FC<SimpleBarChartProps> = ({
-  data,
-  height = 200,
-  color,
-  maxValue,
-  title,
-  unit = '',
+	data,
+	title,
+	yAxisLabel,
+	color = GRADIENT_COLORS.primary,
+	height = 320,
+	interactive = true,
 }) => {
-  const theme = useTheme<Theme>();
-  const barColor = color || theme.colors.primary;
-  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
-  
-  if (data.length === 0) {
-    return (
-      <Box padding="xl" alignItems="center">
-        <Ionicons name="bar-chart-outline" size={48} color={theme.colors.secondaryText} />
-        <Text variant="body" color="secondaryText" textAlign="center" marginTop="m">
-          No data available
-        </Text>
-      </Box>
-    );
-  }
+	const { width } = useWindowDimensions();
+	const chartWidth = Number.isFinite(width) ? Math.min(width - 32, 600) : 320;
+	const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
 
-  const max = maxValue || Math.max(...data.map(d => d.value), 1);
-  const chartHeight = height - 50;
-  const avg = data.reduce((sum, d) => sum + d.value, 0) / data.length;
+	const maxValue = useMemo(() => {
+		const values = data.map((d) => d.y);
+		return Math.max(...values, 1);
+	}, [data]);
 
-  const handleBarPress = (index: number) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setSelectedIndex(selectedIndex === index ? null : index);
-  };
+	const chartData = useMemo(() => {
+		return data.length > 0
+			? data
+			: [
+					{ x: "No Data", y: 0 },
+					{ x: "", y: 0 },
+			  ];
+	}, [data]);
 
-  // Calculate y-axis labels
-  const yAxisSteps = 4;
-  const yAxisLabels = Array.from({ length: yAxisSteps + 1 }, (_, i) => {
-    const value = (max / yAxisSteps) * i;
-    return value.toFixed(1);
-  }).reverse();
+	// Calculate average for reference line
+	const average = useMemo(() => {
+		if (data.length === 0) return 0;
+		const sum = data.reduce((acc, d) => acc + d.y, 0);
+		return sum / data.length;
+	}, [data]);
 
-  const barWidth = Math.max(24, Math.min(40, 300 / data.length));
+	// Theming & layout
+	const restyleTheme = useTheme();
+	const barColor =
+		color ||
+		(restyleTheme?.colors?.primary as string) ||
+		GRADIENT_COLORS.primary;
 
-  return (
-    <Box>
-      {title && (
-        <Text variant="subtitle" marginBottom="s">{title}</Text>
-      )}
-      
-      {/* Stats Row */}
-      <Box flexDirection="row" justifyContent="space-around" marginBottom="m">
-        <Box alignItems="center">
-          <Text variant="caption" color="secondaryText">Average</Text>
-          <Text variant="body" fontWeight="600">{avg.toFixed(1)}{unit}</Text>
-        </Box>
-        <Box alignItems="center">
-          <Text variant="caption" color="secondaryText">Max</Text>
-          <Text variant="body" fontWeight="600">{max.toFixed(1)}{unit}</Text>
-        </Box>
-        <Box alignItems="center">
-          <Text variant="caption" color="secondaryText">Total</Text>
-          <Text variant="body" fontWeight="600">{data.reduce((s, d) => s + d.value, 0).toFixed(1)}{unit}</Text>
-        </Box>
-      </Box>
+	const contentWidthUnclamped = Math.max(
+		chartWidth,
+		(data && data.length ? data.length : 1) * MIN_POINT_SPACING +
+			LEFT_AXIS_WIDTH +
+			40
+	);
+	const contentWidth = Number.isFinite(contentWidthUnclamped)
+		? Math.floor(contentWidthUnclamped)
+		: chartWidth;
 
-      {/* Selected Value Tooltip */}
-      {selectedIndex !== null && (
-        <Box 
-          backgroundColor="primaryLight" 
-          padding="s" 
-          borderRadius="s" 
-          marginBottom="s"
-          alignItems="center"
-        >
-          <Text variant="body" fontWeight="600" color="primary">
-            {data[selectedIndex].label}: {data[selectedIndex].value.toFixed(1)}{unit}
-          </Text>
-        </Box>
-      )}
-
-      {/* Chart with Y-axis */}
-      <Box flexDirection="row">
-        {/* Y-axis labels */}
-        <Box justifyContent="space-between" height={chartHeight} paddingRight="xs" paddingVertical="xs">
-          {yAxisLabels.map((label, i) => (
-            <Text key={i} variant="caption" color="secondaryText" style={{ fontSize: 9, lineHeight: 10 }}>
-              {label}
-            </Text>
-          ))}
-        </Box>
-
-        {/* Chart area with bars and x-axis labels in sync */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }}>
-          <Box>
-            {/* Bars */}
-            <Box flexDirection="row" alignItems="flex-end" height={chartHeight} paddingHorizontal="xs">
-              {data.map((point, index) => {
-                const barHeight = (point.value / max) * chartHeight * 0.85;
-                const isSelected = selectedIndex === index;
-                
-                return (
-                  <Pressable key={index} onPress={() => handleBarPress(index)}>
-                    <Box
-                      alignItems="center"
-                      justifyContent="flex-end"
-                      marginHorizontal="xs"
-                      style={{ width: barWidth + 8 }}
-                    >
-                      {/* Value label on top of bar */}
-                      {point.value > 0 && isSelected && (
-                        <Text variant="caption" marginBottom="xs" color="primary" fontWeight="600">
-                          {point.value.toFixed(1)}
-                        </Text>
-                      )}
-                      
-                      {/* Bar */}
-                      <View
-                        style={{
-                          width: barWidth,
-                          height: Math.max(barHeight, 4),
-                          backgroundColor: isSelected ? theme.colors.primary : barColor,
-                          borderRadius: 6,
-                          opacity: isSelected ? 1 : 0.8,
-                        }}
-                      />
-                    </Box>
-                  </Pressable>
-                );
-              })}
-            </Box>
-
-            {/* X-axis labels (synchronized with bars) */}
-            <Box flexDirection="row" marginTop="s" paddingHorizontal="xs">
-              {data.map((point, index) => (
-                <Box key={index} alignItems="center" marginHorizontal="xs" style={{ width: barWidth + 8 }}>
-                  <Text 
-                    variant="caption" 
-                    color={selectedIndex === index ? 'primary' : 'secondaryText'} 
-                    textAlign="center" 
-                    numberOfLines={1}
-                    style={{ fontSize: 10 }}
-                  >
-                    {point.label}
-                  </Text>
-                </Box>
-              ))}
-            </Box>
-          </Box>
-        </ScrollView>
-      </Box>
-    </Box>
-  );
+	return (
+		<View style={{ marginVertical: 12 }}>
+			{title && (
+				<View style={{ paddingHorizontal: 16, marginBottom: 8 }}>
+					<Text
+						style={{
+							fontSize: 16,
+							fontWeight: "700",
+							color: restyleTheme.colors.primaryText,
+							letterSpacing: -0.3,
+						}}
+					>
+						{title}
+					</Text>
+					{average > 0 && (
+						<Text
+							style={{
+								fontSize: 12,
+								fontWeight: "500",
+								color: "#6B7280",
+								marginTop: 4,
+							}}
+						>
+							Average: {average.toFixed(1)}h/day
+						</Text>
+					)}
+				</View>
+			)}
+			<ChartCard
+				dataLength={data.length}
+				leftAxisDomainMax={Math.max(maxValue * 1.15, 16)}
+				height={height}
+			>
+				<VictoryChart
+					width={contentWidth}
+					height={height}
+					padding={{
+						top: 24,
+						bottom: 48,
+					}}
+					theme={modernChartTheme}
+					domain={{ y: [0, Math.max(maxValue * 1.15, 18)] }}
+					domainPadding={{ x: Math.floor(MIN_POINT_SPACING / 2), y: 0 }}
+				>
+					<VictoryAxis
+						tickFormat={(tick) => String(tick)}
+						style={{
+							tickLabels: {
+								fontSize: 10,
+								angle: -45,
+								textAnchor: "end",
+								fill: "#6B7280",
+							},
+						}}
+					/>
+					{/* dependentAxis intentionally omitted from the scrollable chart to keep y-axis sticky */}
+					<VictoryBar
+						data={chartData}
+						x="x"
+						y="y"
+						style={{
+							data: {
+								fill: ({ index }) =>
+									hoveredIndex === index ? barColor : barColor,
+								fillOpacity: ({ index }) => (hoveredIndex === index ? 1 : 0.85),
+								stroke: ({ index }) =>
+									hoveredIndex === index ? barColor : "transparent",
+								strokeWidth: ({ index }) => (hoveredIndex === index ? 2 : 0),
+							},
+						}}
+						cornerRadius={{ top: 8, bottom: 0 }}
+						barWidth={({ index }) =>
+							hoveredIndex === index
+								? Math.max(18, MIN_POINT_SPACING - 6)
+								: Math.max(14, MIN_POINT_SPACING - 10)
+						}
+						labels={({ datum }) =>
+							interactive ? `${datum.y.toFixed(1)}h` : ""
+						}
+						events={
+							interactive
+								? [
+										{
+											target: "data",
+											eventHandlers: {
+												onPressIn: () => {
+													return [
+														{
+															target: "data",
+															mutation: (props) => {
+																setHoveredIndex(props.index);
+																return null;
+															},
+														},
+													];
+												},
+												onPressOut: () => {
+													setHoveredIndex(null);
+													return [];
+												},
+											},
+										},
+								  ]
+								: []
+						}
+						labelComponent={
+							interactive ? (
+								<VictoryTooltip
+									style={{
+										fontSize: 12,
+										fill: "#FFFFFF",
+										fontWeight: "700",
+									}}
+									flyoutStyle={{
+										fill: "#1F2937",
+										stroke: barColor,
+										strokeWidth: 2,
+										rx: 8,
+									}}
+									flyoutPadding={{ top: 6, bottom: 6, left: 12, right: 12 }}
+									centerOffset={{ y: -10 }}
+								/>
+							) : undefined
+						}
+					/>
+				</VictoryChart>
+			</ChartCard>
+		</View>
+	);
 };
 
-// Date Range Options
-export type DateRangeOption = '7d' | '14d' | '28d' | '90d';
+export const SimpleLineChart: React.FC<SimpleLineChartProps> = ({
+	data,
+	title,
+	yAxisLabel,
+	color = GRADIENT_COLORS.accent,
+	height = DEFAULT_CHART_HEIGHT,
+	interactive = true,
+}) => {
+	const { width } = useWindowDimensions();
+	const chartWidth = Number.isFinite(width) ? Math.min(width - 32, 600) : 320;
+
+	const maxValue = useMemo(() => {
+		const values = data.map((d) => d.y);
+		return Math.max(...values, 1);
+	}, [data]);
+
+	const chartData = useMemo(() => {
+		return data.length > 0
+			? data
+			: [
+					{ x: "No Data", y: 0 },
+					{ x: "", y: 0 },
+			  ];
+	}, [data]);
+
+	// Theming & layout
+	const restyleTheme = useTheme();
+	const lineColor =
+		color || (restyleTheme?.colors?.accent as string) || GRADIENT_COLORS.accent;
+	const LEFT_AXIS_WIDTH = 80;
+	const MIN_POINT_SPACING = 28;
+	const contentWidthUnclamped = Math.max(
+		chartWidth,
+		(data && data.length ? data.length : 1) * MIN_POINT_SPACING +
+			LEFT_AXIS_WIDTH +
+			40
+	);
+	const contentWidth = Number.isFinite(contentWidthUnclamped)
+		? Math.floor(contentWidthUnclamped)
+		: chartWidth;
+
+	return (
+		<View style={{ marginVertical: 12 }}>
+			{title && (
+				<View style={{ paddingHorizontal: 16, marginBottom: 12 }}>
+					<Text
+						style={{
+							fontSize: 16,
+							fontWeight: "700",
+							color: restyleTheme.colors.primaryText,
+							letterSpacing: -0.3,
+						}}
+					>
+						{title}
+					</Text>
+				</View>
+			)}
+			<ChartCard
+				dataLength={data.length}
+				leftAxisDomainMax={Math.max(maxValue * 1.2, 16)}
+				height={height}
+			>
+				<VictoryChart
+					width={contentWidth}
+					height={height}
+					padding={{
+						top: 24,
+						bottom: 48,
+						left: 8,
+						right: 24,
+					}}
+					theme={modernChartTheme}
+					domain={{ y: [0, maxValue * 1.2] }}
+					containerComponent={
+						interactive ? (
+							<VictoryVoronoiContainer
+								voronoiDimension="x"
+								labels={({ datum }) => `${datum.y}h`}
+								labelComponent={
+									<VictoryTooltip
+										style={{
+											fontSize: 12,
+											fill: "#FFFFFF",
+											fontWeight: "700",
+										}}
+										flyoutStyle={{
+											fill: "#1F2937",
+											stroke: lineColor,
+											strokeWidth: 2,
+											rx: 8,
+										}}
+										flyoutPadding={{ top: 8, bottom: 8, left: 14, right: 14 }}
+										cornerRadius={8}
+									/>
+								}
+							/>
+						) : undefined
+					}
+				>
+					<VictoryAxis
+						tickFormat={(tick) => String(tick)}
+						style={{
+							tickLabels: {
+								fontSize: 10,
+								angle: -45,
+								textAnchor: "end",
+								fill: "#6B7280",
+							},
+						}}
+					/>
+					{/* dependentAxis intentionally omitted to keep y-axis sticky */}
+					<VictoryArea
+						data={chartData}
+						x="x"
+						y="y"
+						style={{
+							data: {
+								fill: lineColor,
+								fillOpacity: 0.15,
+								stroke: lineColor,
+								strokeWidth: 2.5,
+							},
+						}}
+						interpolation="monotoneX"
+					/>
+				</VictoryChart>
+			</ChartCard>
+		</View>
+	);
+};
+
+export const AreaChart: React.FC<AreaChartProps> = ({
+	data,
+	title,
+	yAxisLabel,
+	color = GRADIENT_COLORS.success,
+	height = DEFAULT_CHART_HEIGHT,
+	interactive = true,
+}) => {
+	const { width } = useWindowDimensions();
+	const chartWidth = Number.isFinite(width) ? Math.min(width - 32, 600) : 320;
+
+	const maxValue = useMemo(() => {
+		const values = data.map((d) => d.y);
+		return Math.max(...values, 1);
+	}, [data]);
+
+	const chartData = useMemo(() => {
+		return data.length > 0
+			? data
+			: [
+					{ x: "No Data", y: 0 },
+					{ x: "", y: 0 },
+			  ];
+	}, [data]);
+
+	// Calculate trend stats
+	const stats = useMemo(() => {
+		if (data.length === 0) return { avg: 0, trend: "stable" };
+		const sum = data.reduce((acc, d) => acc + d.y, 0);
+		const avg = sum / data.length;
+
+		// Simple trend calculation (first half vs second half)
+		const mid = Math.floor(data.length / 2);
+		const firstHalf = data.slice(0, mid);
+		const secondHalf = data.slice(mid);
+		const firstAvg =
+			firstHalf.reduce((acc, d) => acc + d.y, 0) / firstHalf.length;
+		const secondAvg =
+			secondHalf.reduce((acc, d) => acc + d.y, 0) / secondHalf.length;
+		const diff = secondAvg - firstAvg;
+
+		let trend = "stable";
+		if (diff > 0.5) trend = "increasing";
+		else if (diff < -0.5) trend = "decreasing";
+
+		return { avg, trend, diff: Math.abs(diff) };
+	}, [data]);
+
+	// Theming & layout
+	const restyleTheme = useTheme();
+	const areaColor =
+		color ||
+		(restyleTheme?.colors?.success as string) ||
+		GRADIENT_COLORS.success;
+	const LEFT_AXIS_WIDTH = 64;
+	const MIN_POINT_SPACING = 28;
+	const contentWidthUnclamped = Math.max(
+		chartWidth,
+		(data && data.length ? data.length : 1) * MIN_POINT_SPACING +
+			LEFT_AXIS_WIDTH +
+			40
+	);
+	const contentWidth = Number.isFinite(contentWidthUnclamped)
+		? Math.floor(contentWidthUnclamped)
+		: chartWidth;
+
+	return (
+		<View style={{ marginVertical: 12 }}>
+			{title && (
+				<View style={{ paddingHorizontal: 16, marginBottom: 8 }}>
+					<Text
+						style={{
+							fontSize: 16,
+							fontWeight: "700",
+							color: restyleTheme.colors.primaryText,
+							letterSpacing: -0.3,
+						}}
+					>
+						{title}
+					</Text>
+					{stats.avg > 0 && (
+						<View
+							style={{
+								flexDirection: "row",
+								marginTop: 4,
+								alignItems: "center",
+							}}
+						>
+							<Text
+								style={{
+									fontSize: 12,
+									fontWeight: "500",
+									color: "#6B7280",
+								}}
+							>
+								Trend: {stats.avg.toFixed(1)}h avg
+							</Text>
+							<Text
+								style={{
+									fontSize: 11,
+									fontWeight: "600",
+									color:
+										stats.trend === "increasing"
+											? "#10B981"
+											: stats.trend === "decreasing"
+											? "#EF4444"
+											: "#6B7280",
+									marginLeft: 8,
+									paddingHorizontal: 8,
+									paddingVertical: 2,
+									borderRadius: 4,
+									backgroundColor:
+										stats.trend === "increasing"
+											? "#D1FAE5"
+											: stats.trend === "decreasing"
+											? "#FEE2E2"
+											: "#F3F4F6",
+								}}
+							>
+								{stats.trend === "increasing"
+									? "↗ improving"
+									: stats.trend === "decreasing"
+									? "↘ declining"
+									: "→ stable"}
+							</Text>
+						</View>
+					)}
+				</View>
+			)}
+			<ChartCard
+				dataLength={data.length}
+				leftAxisDomainMax={Math.max(maxValue * 1.15, 16)}
+				height={height}
+			>
+				<VictoryChart
+					width={contentWidth}
+					height={height}
+					padding={{
+						top: 24,
+						bottom: 48,
+						left: 8,
+						right: 24,
+					}}
+					theme={modernChartTheme}
+					domain={{ y: [0, Math.max(maxValue * 1.15, 16)] }}
+					containerComponent={
+						interactive ? (
+							<VictoryVoronoiContainer
+								voronoiDimension="x"
+								labels={({ datum }) => `${datum.x}: ${datum.y.toFixed(1)}h`}
+								labelComponent={
+									<VictoryTooltip
+										style={{
+											fontSize: 12,
+											fill: "#FFFFFF",
+											fontWeight: "700",
+										}}
+										flyoutStyle={{
+											fill: "#1F2937",
+											stroke: areaColor,
+											strokeWidth: 2,
+											rx: 8,
+										}}
+										flyoutPadding={{ top: 8, bottom: 8, left: 14, right: 14 }}
+										cornerRadius={8}
+									/>
+								}
+							/>
+						) : undefined
+					}
+				>
+					<VictoryAxis
+						tickFormat={(tick) => String(tick)}
+						style={{
+							tickLabels: {
+								fontSize: 10,
+								angle: -45,
+								textAnchor: "end",
+								fill: "#6B7280",
+							},
+						}}
+					/>
+					{/* dependentAxis intentionally omitted to keep y-axis sticky */}
+					<VictoryArea
+						data={chartData}
+						x="x"
+						y="y"
+						style={{
+							data: {
+								fill: areaColor,
+								fillOpacity: 0.3,
+								stroke: areaColor,
+								strokeWidth: 3,
+								strokeLinecap: "round",
+							},
+						}}
+						interpolation="natural"
+					/>
+				</VictoryChart>
+			</ChartCard>
+		</View>
+	);
+};
+
+// Optional: Re-export for convenience
+export { VictoryChart, VictoryBar, VictoryArea, VictoryAxis };
 
 interface DateRangeSelectorProps {
-  selected: DateRangeOption;
-  onChange: (range: DateRangeOption) => void;
+	selected: DateRangeOption;
+	onChange: (option: DateRangeOption) => void;
 }
 
-export const DateRangeSelector: React.FC<DateRangeSelectorProps> = ({ selected, onChange }) => {
-  const theme = useTheme<Theme>();
-  const options: { value: DateRangeOption; label: string }[] = [
-    { value: '7d', label: '7 Days' },
-    { value: '14d', label: '14 Days' },
-    { value: '28d', label: '28 Days' },
-    { value: '90d', label: '90 Days' },
-  ];
-
-  return (
-    <Box flexDirection="row" backgroundColor="mainBackground" borderRadius="m" padding="xs">
-      {options.map((option) => (
-        <Pressable
-          key={option.value}
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            onChange(option.value);
-          }}
-          style={{ flex: 1 }}
-        >
-          <Box
-            backgroundColor={selected === option.value ? 'cardBackground' : 'transparent'}
-            padding="s"
-            borderRadius="s"
-            alignItems="center"
-            shadowColor={selected === option.value ? 'black' : 'transparent'}
-            shadowOpacity={selected === option.value ? 0.1 : 0}
-            shadowRadius={4}
-            shadowOffset={{ width: 0, height: 2 }}
-          >
-            <Text
-              variant="caption"
-              color={selected === option.value ? 'primary' : 'secondaryText'}
-              fontWeight={selected === option.value ? '600' : '400'}
-            >
-              {option.label}
-            </Text>
-          </Box>
-        </Pressable>
-      ))}
-    </Box>
-  );
-};
-
-// Line Chart for Trends
-interface LineChartProps {
-  data: ChartDataPoint[];
-  height?: number;
-  color?: string;
-  showArea?: boolean;
-}
-
-export const SimpleLineChart: React.FC<LineChartProps> = ({
-  data,
-  height = 150,
-  color,
-  showArea = true,
+export const DateRangeSelector: React.FC<DateRangeSelectorProps> = ({
+	selected,
+	onChange,
 }) => {
-  const theme = useTheme<Theme>();
-  const lineColor = color || theme.colors.primary;
+	const theme = useTheme();
+	const options: Array<{ label: string; value: DateRangeOption }> = [
+		{ label: "7 Days", value: "7d" },
+		{ label: "14 Days", value: "14d" },
+		{ label: "28 Days", value: "28d" },
+		{ label: "90 Days", value: "90d" },
+	];
 
-  if (data.length < 2) {
-    return (
-      <Box padding="l" alignItems="center">
-        <Text variant="caption" color="secondaryText">
-          Need at least 2 data points
-        </Text>
-      </Box>
-    );
-  }
-
-  const max = Math.max(...data.map(d => d.value), 1);
-  const min = Math.min(...data.map(d => d.value), 0);
-  const range = max - min || 1;
-  const chartHeight = height - 30;
-
-  // Y-axis labels
-  const yAxisSteps = 4;
-  const yAxisLabels = Array.from({ length: yAxisSteps + 1 }, (_, i) => {
-    const value = min + (range / yAxisSteps) * i;
-    return value.toFixed(1);
-  }).reverse();
-
-  // Determine which x-axis labels to show based on data length
-  const showEveryNth = data.length > 14 ? Math.ceil(data.length / 7) : 
-                       data.length > 7 ? 2 : 1;
-
-  return (
-    <Box>
-      <Box flexDirection="row">
-        {/* Y-axis labels */}
-        <Box justifyContent="space-between" height={chartHeight} paddingRight="xs" paddingVertical="xs">
-          {yAxisLabels.map((label, i) => (
-            <Text key={i} variant="caption" color="secondaryText" style={{ fontSize: 9, lineHeight: 10 }}>
-              {label}
-            </Text>
-          ))}
-        </Box>
-
-        {/* Chart area */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }}>
-          <Box>
-            {/* Line and dots */}
-            <Box height={chartHeight} flexDirection="row" alignItems="flex-end">
-              {data.map((point, index) => {
-                const normalizedHeight = ((point.value - min) / range) * (chartHeight - 20);
-                const dotSize = 8;
-                const columnWidth = Math.max(30, 400 / data.length);
-                
-                return (
-                  <Box 
-                    key={index} 
-                    width={columnWidth} 
-                    height={chartHeight} 
-                    justifyContent="flex-end" 
-                    alignItems="center"
-                  >
-                    {/* Dot */}
-                    <View
-                      style={{
-                        width: dotSize,
-                        height: dotSize,
-                        borderRadius: dotSize / 2,
-                        backgroundColor: lineColor,
-                        position: 'absolute',
-                        bottom: normalizedHeight,
-                        zIndex: 2,
-                      }}
-                    />
-                    {/* Stem */}
-                    {showArea && (
-                      <View
-                        style={{
-                          width: 2,
-                          height: normalizedHeight,
-                          backgroundColor: lineColor + '40',
-                          borderTopLeftRadius: 1,
-                          borderTopRightRadius: 1,
-                        }}
-                      />
-                    )}
-                    {/* Connection line to next point */}
-                    {index < data.length - 1 && (
-                      <View
-                        style={{
-                          position: 'absolute',
-                          bottom: normalizedHeight,
-                          left: columnWidth / 2,
-                          width: columnWidth,
-                          height: 2,
-                          backgroundColor: lineColor,
-                          zIndex: 1,
-                        }}
-                      />
-                    )}
-                  </Box>
-                );
-              })}
-            </Box>
-            
-            {/* X-axis labels (show subset for readability) */}
-            <Box flexDirection="row" marginTop="s">
-              {data.map((point, index) => {
-                const columnWidth = Math.max(30, 400 / data.length);
-                const shouldShow = index % showEveryNth === 0 || index === data.length - 1;
-                
-                return (
-                  <Box key={index} width={columnWidth} alignItems="center">
-                    {shouldShow && (
-                      <Text 
-                        variant="caption" 
-                        color="secondaryText" 
-                        textAlign="center" 
-                        style={{ fontSize: 9 }}
-                      >
-                        {point.label}
-                      </Text>
-                    )}
-                  </Box>
-                );
-              })}
-            </Box>
-          </Box>
-        </ScrollView>
-      </Box>
-    </Box>
-  );
+	return (
+		<View
+			style={{
+				flexDirection: "row",
+				justifyContent: "space-between",
+				marginBottom: 20,
+				paddingHorizontal: 16,
+				gap: 8,
+			}}
+		>
+			{options.map((option) => (
+				<TouchableOpacity
+					key={option.value}
+					onPress={() => onChange(option.value)}
+					style={{
+						flex: 1,
+						paddingVertical: 10,
+						paddingHorizontal: 12,
+						borderRadius: 10,
+						backgroundColor:
+							selected === option.value ? theme.colors.primary : "#F3F4F6",
+						alignItems: "center",
+						borderWidth: selected === option.value ? 0 : 1.5,
+						borderColor: "#E5E7EB",
+						shadowColor:
+							selected === option.value ? theme.colors.primary : "transparent",
+						shadowOpacity: selected === option.value ? 0.2 : 0,
+						shadowRadius: selected === option.value ? 8 : 0,
+						shadowOffset: { width: 0, height: 2 },
+						elevation: selected === option.value ? 3 : 0,
+					}}
+				>
+					<Text
+						style={{
+							fontSize: 12,
+							fontWeight: "700",
+							color: selected === option.value ? "#FFFFFF" : "#6B7280",
+							letterSpacing: -0.2,
+						}}
+					>
+						{option.label}
+					</Text>
+				</TouchableOpacity>
+			))}
+		</View>
+	);
 };

@@ -51,4 +51,42 @@ describe('NotificationService', () => {
     expect(typeof arg.trigger.seconds).toBe('number');
     expect(arg.trigger.seconds).toBeGreaterThanOrEqual(4);
   });
+
+  it('logs manual scheduled notification to database', async () => {
+    const futureDate = new Date(Date.now() + 5000);
+    const result = await NotificationService.scheduleNotification({
+      title: 'Test',
+      body: 'Body',
+      scheduledForISO: futureDate.toISOString(),
+      scheduleBlockId: 'manual-1',
+    });
+
+    // ensure expo scheduling was attempted
+    expect(Notifications.scheduleNotificationAsync).toHaveBeenCalled();
+    // ensure db.logNotification was called
+    const { db } = require('../database');
+    expect(db.logNotification).toHaveBeenCalled();
+    expect(result).toHaveProperty('success', true);
+    expect(result).toHaveProperty('log');
+  });
+
+  it('filters invalid notification rows when fetching logs', async () => {
+    const { db } = require('../database');
+    db.getNotificationLogs.mockResolvedValueOnce([
+      // valid
+      { id: '1', title: 'Good', body: 'x', scheduledForISO: new Date(Date.now() + 5000).toISOString(), notificationId: 'a', status: 'scheduled', createdAtISO: new Date().toISOString() },
+      // invalid - missing title
+      { id: '2', title: '', body: 'x', scheduledForISO: new Date(Date.now() + 5000).toISOString(), notificationId: 'b', status: 'scheduled', createdAtISO: new Date().toISOString() },
+      // invalid - bad ISO
+      { id: '3', title: 'BadISO', body: 'x', scheduledForISO: 'not-a-date', notificationId: 'c', status: 'scheduled', createdAtISO: new Date().toISOString() },
+      // invalid - bad status
+      { id: '4', title: 'BadStatus', body: 'x', scheduledForISO: new Date(Date.now() + 5000).toISOString(), notificationId: 'd', status: 'unknown', createdAtISO: new Date().toISOString() },
+    ]);
+
+    const logs = await NotificationService.getNotificationLog();
+    expect(Array.isArray(logs)).toBe(true);
+    // Only one valid row expected
+    expect(logs.length).toBe(1);
+    expect(logs[0].id).toBe('1');
+  });
 });

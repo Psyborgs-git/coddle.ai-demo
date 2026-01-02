@@ -13,6 +13,7 @@ import { differenceInMonths, format, parseISO } from 'date-fns';
 import * as Haptics from 'expo-haptics';
 import Toast from 'react-native-toast-message';
 import { getCurrentTimezone, isDST } from '../utils/date';
+import TimezoneSelector from '../components/ui/TimezoneSelector';
 import { NotificationService } from '../services/notifications';
 import { db } from '../services/database';
 
@@ -45,6 +46,19 @@ export const SettingsScreen = () => {
   const [isDark, setIsDark] = useState(false);
   const [showNotificationLog, setShowNotificationLog] = useState(false);
   const [notificationLogs, setNotificationLogs] = useState<any[]>([]);
+  
+  // Notification Modal State
+  const [showNotificationModal, setShowNotificationModal] = useState(false);
+  const [notifTitle, setNotifTitle] = useState('');
+  const [notifBody, setNotifBody] = useState('');
+  const [notifDate, setNotifDate] = useState(new Date());
+  const [showNotifDatePicker, setShowNotifDatePicker] = useState(false);
+  
+  // Timezone State
+  const [customTimezone, setCustomTimezone] = useState(timezone);
+  const [isEditingTimezone, setIsEditingTimezone] = useState(false);
+  const [showTimezoneModal, setShowTimezoneModal] = useState(false);
+  const dstOverride = useStore(state => state.dstOverride);
 
   // Load notification logs when expanded
   useEffect(() => {
@@ -60,6 +74,64 @@ export const SettingsScreen = () => {
     } catch (error) {
       console.error('Failed to load notification logs:', error);
     }
+  };
+
+  const handleSaveNotification = async () => {
+    if (!notifTitle.trim()) {
+      Alert.alert('Error', 'Please enter a title');
+      return;
+    }
+    
+    if (notifDate <= new Date()) {
+      Alert.alert('Error', 'Please select a future time');
+      return;
+    }
+
+    const result: any = await NotificationService.scheduleNotification({
+      title: notifTitle,
+      body: notifBody || 'Reminder',
+      scheduledForISO: notifDate.toISOString(),
+      scheduleBlockId: 'manual-' + uuidv4(),
+    });
+
+    if (!result || result.success === false) {
+      Toast.show({ type: 'error', text1: 'Failed to save notification' });
+      setShowNotificationModal(false);
+      setNotifTitle('');
+      setNotifBody('');
+      setNotifDate(new Date());
+      return;
+    }
+
+    setShowNotificationModal(false);
+    setNotifTitle('');
+    setNotifBody('');
+    setNotifDate(new Date());
+
+    // If the NotificationService returned a log entry, prepend it to state so UI updates immediately
+    if (result && result.log) {
+      setNotificationLogs((prev) => [result.log, ...prev]);
+    } else {
+      // Refresh logs (small delay to ensure DB write completes)
+      setTimeout(loadNotificationLogs, 200);
+    }
+
+    Toast.show({ type: 'success', text1: 'Notification Scheduled' });
+  };
+
+  const handleCancelNotification = async (log: any) => {
+    if (log.notificationId) {
+      await NotificationService.cancelNotification(log.notificationId);
+      await loadNotificationLogs();
+      Toast.show({ type: 'info', text1: 'Notification Cancelled' });
+    }
+  };
+
+  const handleSaveTimezone = async () => {
+     await db.saveSetting('timezone', customTimezone);
+     useStore.setState({ timezone: customTimezone });
+     setIsEditingTimezone(false);
+     Toast.show({ type: 'success', text1: 'Timezone Updated' });
   };
 
   const openAddModal = () => {
@@ -186,6 +258,11 @@ export const SettingsScreen = () => {
     );
   };
 
+  const handleGenerateSuggestions = async () => {
+    await loadNotificationLogs();
+    Toast.show({ type: 'info', text1: 'Refreshed' });
+  };
+
   const getAgeString = (birthISO: string) => {
     const months = differenceInMonths(new Date(), parseISO(birthISO));
     if (months < 1) return 'Newborn';
@@ -198,9 +275,9 @@ export const SettingsScreen = () => {
   };
 
   return (
-    <Box flex={1} backgroundColor="mainBackground">
+    <Box flex={1} backgroundColor="mainBackground"  >
       <ScrollView showsVerticalScrollIndicator={false}>
-        <Box padding="l" style={{ paddingTop: insets.top + 16 }}>
+        <Box padding="l" style={{ paddingTop: insets.top + 16, paddingBottom: insets.bottom + 120 }}>
           <Text variant="header" marginBottom="l">Settings</Text>
 
           {/* Theme Selector */}
@@ -369,14 +446,22 @@ export const SettingsScreen = () => {
                 <Text variant="body" color="secondaryText">Build</Text>
                 <Text variant="body">Expo SDK 54</Text>
               </Box>
-              <Box 
-                flexDirection="row" 
-                justifyContent="space-between" 
-                paddingVertical="s"
-                style={{ borderTopWidth: 1, borderTopColor: theme.colors.gray100 }}
-              >
+              <Box flexDirection="row" justifyContent="space-between" paddingVertical="s" style={{ borderTopWidth: 1, borderTopColor: theme.colors.gray100 }}>
                 <Text variant="body" color="secondaryText">Timezone</Text>
-                <Text variant="body">{timezone}</Text>
+                <Box>
+                  <Box flexDirection="row" alignItems="center">
+                    <Text variant="body" marginRight="xs">{timezone}</Text>
+                    <Pressable onPress={() => setShowTimezoneModal(true)}>
+                      <Box padding="s">
+                        <Ionicons name="globe-outline" size={18} color={theme.colors.primary} />
+                      </Box>
+                    </Pressable>
+                  </Box>
+                  <Text variant="caption" color="secondaryText">
+                    {dstOverride === 'auto' ? (isDST(new Date(), timezone) ? 'DST Active' : 'DST Inactive') : dstOverride === 'on' ? 'DST Forced On' : 'DST Forced Off'}
+                  </Text>
+                </Box>
+                <TimezoneSelector visible={showTimezoneModal} onClose={() => setShowTimezoneModal(false)} />
               </Box>
               <Box flexDirection="row" justifyContent="space-between" paddingVertical="s">
                 <Text variant="body" color="secondaryText">DST Active</Text>
@@ -385,86 +470,86 @@ export const SettingsScreen = () => {
             </Box>
           </Box>
 
-          {/* Notification Log */}
-          <Box marginBottom="l">
-            <Text variant="subtitle" marginBottom="m">Notifications</Text>
-            <Pressable onPress={() => setShowNotificationLog(!showNotificationLog)}>
-              <Box
-                backgroundColor="cardBackground"
-                borderRadius="l"
-                padding="m"
-                flexDirection="row"
-                alignItems="center"
-                justifyContent="space-between"
-                shadowColor="black"
-                shadowOpacity={0.05}
-                shadowRadius={8}
-                shadowOffset={{ width: 0, height: 2 }}
-              >
-                <Box flexDirection="row" alignItems="center">
-                  <Ionicons name="notifications-outline" size={24} color={theme.colors.primary} />
-                  <Box marginLeft="m">
-                    <Text variant="body" fontWeight="600">View Notification Log</Text>
-                    <Text variant="caption" color="secondaryText">
-                      See scheduled and delivered notifications
-                    </Text>
-                  </Box>
-                </Box>
-                <Ionicons 
-                  name={showNotificationLog ? "chevron-up" : "chevron-forward"} 
-                  size={20} 
-                  color={theme.colors.secondaryText} 
-                />
+          {/* Scheduled Notifications */}
+          <Box marginBottom="xl">
+            <Box flexDirection="row" justifyContent="space-between" alignItems="center" marginBottom="m">
+              <Text variant="subtitle">Scheduled Notifications</Text>
+              <Box flexDirection="row">
+                <Pressable onPress={handleGenerateSuggestions} style={{ marginRight: 12 }}>
+                  <Ionicons name="refresh-circle" size={28} color={theme.colors.primary} />
+                </Pressable>
+                <Pressable onPress={() => setShowNotificationModal(true)}>
+                  <Ionicons name="add-circle" size={28} color={theme.colors.primary} />
+                </Pressable>
               </Box>
-            </Pressable>
+            </Box>
 
-            {showNotificationLog && (
-              <Box
-                backgroundColor="cardBackground"
-                borderRadius="l"
-                padding="m"
-                marginTop="s"
-              >
-                {notificationLogs.length > 0 ? (
-                  notificationLogs.slice(0, 10).map((log, index) => (
-                    <Box
-                      key={log.id}
-                      paddingVertical="s"
-                      style={{
-                        borderTopWidth: index > 0 ? 1 : 0,
-                        borderTopColor: theme.colors.gray100
-                      }}
-                    >
-                      <Box flexDirection="row" justifyContent="space-between" alignItems="center">
-                        <Text variant="caption" fontWeight="600">{log.title}</Text>
-                        <Box
-                          paddingHorizontal="s"
-                          paddingVertical="xs"
-                          borderRadius="s"
-                          backgroundColor={
-                            log.status === 'scheduled' ? 'primary' as any :
-                            log.status === 'delivered' ? 'success' as any :
-                            'secondaryText' as any
-                          }
-                          opacity={0.2}
-                        >
-                          <Text variant="caption" fontSize={10} fontWeight="600">
-                            {log.status.toUpperCase()}
-                          </Text>
-                        </Box>
+            <Box
+              backgroundColor="cardBackground"
+              borderRadius="l"
+              padding="m"
+            >
+              {notificationLogs.filter(l => l.status === 'scheduled').length > 0 ? (
+                notificationLogs.filter(l => l.status === 'scheduled').map((log, index) => (
+                  <Box
+                    key={log.id}
+                    paddingVertical="s"
+                    style={{
+                      borderTopWidth: index > 0 ? 1 : 0,
+                      borderTopColor: theme.colors.gray100
+                    }}
+                  >
+                    <Box flexDirection="row" justifyContent="space-between" alignItems="center">
+                      <Box flex={1}>
+                        <Text variant="body" fontWeight="600">{log.title}</Text>
+                        <Text variant="caption" color="secondaryText">{log.body}</Text>
+                        <Text variant="caption" color="primary" marginTop="xs">
+                          {format(parseISO(log.scheduledForISO), 'MMM d, h:mm a')}
+                        </Text>
                       </Box>
-                      <Text variant="caption" color="secondaryText" marginTop="xs">
-                        {format(parseISO(log.scheduledForISO), 'MMM d, h:mm a')}
+                      <Pressable onPress={() => handleCancelNotification(log)}>
+                        <Ionicons name="close-circle-outline" size={24} color={theme.colors.error} />
+                      </Pressable>
+                    </Box>
+                  </Box>
+                ))
+              ) : (
+                <Text variant="body" color="secondaryText" textAlign="center" paddingVertical="m">
+                  No upcoming notifications
+                </Text>
+              )}
+              
+              <Pressable 
+                onPress={() => setShowNotificationLog(!showNotificationLog)}
+                style={{ marginTop: 12, borderTopWidth: 1, borderTopColor: theme.colors.gray100, paddingTop: 12 }}
+              >
+                <Box flexDirection="row" justifyContent="center" alignItems="center">
+                  <Text variant="caption" color="primary">
+                    {showNotificationLog ? 'Hide History' : 'View History'}
+                  </Text>
+                  <Ionicons 
+                    name={showNotificationLog ? "chevron-up" : "chevron-down"} 
+                    size={16} 
+                    color={theme.colors.primary} 
+                    style={{ marginLeft: 4 }}
+                  />
+                </Box>
+              </Pressable>
+
+              {showNotificationLog && (
+                <Box marginTop="m">
+                  <Text variant="caption" color="secondaryText" marginBottom="s">History</Text>
+                  {notificationLogs.filter(l => l.status !== 'scheduled').slice(0, 5).map((log) => (
+                    <Box key={log.id} marginBottom="s" opacity={0.6}>
+                      <Text variant="caption" fontWeight="600">{log.title}</Text>
+                      <Text variant="caption" color="secondaryText">
+                        {log.status.toUpperCase()} • {format(parseISO(log.scheduledForISO), 'MMM d, h:mm a')}
                       </Text>
                     </Box>
-                  ))
-                ) : (
-                  <Text variant="body" color="secondaryText" textAlign="center" paddingVertical="m">
-                    No notifications logged yet
-                  </Text>
-                )}
-              </Box>
-            )}
+                  ))}
+                </Box>
+              )}
+            </Box>
           </Box>
 
           {/* Danger Zone */}
@@ -493,6 +578,61 @@ export const SettingsScreen = () => {
           </Box>
         </Box>
       </ScrollView>
+
+      {/* Add Notification Modal */}
+      <Modal
+        visible={showNotificationModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowNotificationModal(false)}
+      >
+        <Box flex={1} backgroundColor="mainBackground" padding="l" style={{ paddingTop: 20 }}>
+          <Box flexDirection="row" justifyContent="space-between" alignItems="center" marginBottom="xl">
+            <Pressable onPress={() => setShowNotificationModal(false)}>
+              <Text variant="body" color="primary">Cancel</Text>
+            </Pressable>
+            <Text variant="subtitle">Add Reminder</Text>
+            <Pressable onPress={handleSaveNotification}>
+              <Text variant="body" color="primary" fontWeight="600">Save</Text>
+            </Pressable>
+          </Box>
+
+          <Text variant="body" marginBottom="s">Title</Text>
+          <Box backgroundColor="cardBackground" borderRadius="m" marginBottom="l">
+            <TextInput
+              value={notifTitle}
+              onChangeText={setNotifTitle}
+              placeholder="e.g. Give Medicine"
+              placeholderTextColor={theme.colors.secondaryText}
+              style={{ padding: 16, fontSize: 16, color: theme.colors.primaryText }}
+              autoFocus
+            />
+          </Box>
+
+          <Text variant="body" marginBottom="s">Message (Optional)</Text>
+          <Box backgroundColor="cardBackground" borderRadius="m" marginBottom="l">
+            <TextInput
+              value={notifBody}
+              onChangeText={setNotifBody}
+              placeholder="Details..."
+              placeholderTextColor={theme.colors.secondaryText}
+              style={{ padding: 16, fontSize: 16, color: theme.colors.primaryText }}
+            />
+          </Box>
+
+          <Text variant="body" marginBottom="s">Time</Text>
+          <Box backgroundColor="cardBackground" borderRadius="m" overflow="hidden">
+            <DateTimePicker
+              value={notifDate}
+              mode="datetime"
+              display="spinner"
+              minimumDate={new Date()}
+              onChange={(e, date) => date && setNotifDate(date)}
+              textColor={theme.colors.primaryText}
+            />
+          </Box>
+        </Box>
+      </Modal>
 
       {/* Add/Edit Profile Modal */}
       <Modal
@@ -565,7 +705,7 @@ export const SettingsScreen = () => {
 
           {/* Birth Date Picker */}
           <Text variant="body" marginBottom="s">Birth Date</Text>
-          <Pressable onPress={() => setShowDatePicker(true)}>
+          <Pressable onPress={() => setShowDatePicker(!showDatePicker)}>
             <Box
               backgroundColor="cardBackground"
               borderRadius="m"
@@ -589,6 +729,7 @@ export const SettingsScreen = () => {
                 display="spinner"
                 maximumDate={new Date()}
                 textColor={theme.colors.primaryText}
+                onBlur={() => setShowDatePicker(false)}
                 onChange={(e, date) => {
                   setShowDatePicker(Platform.OS === 'ios');
                   if (date) setBirthDate(date);
@@ -616,8 +757,7 @@ export const SettingsScreen = () => {
                 borderRadius="round"
                 alignItems="center"
                 justifyContent="center"
-                marginBottom="m"
-                style={{ 
+                style={{
                   backgroundColor: selectedColor, 
                   shadowColor: selectedColor, 
                   shadowOpacity: 0.3, 
@@ -626,7 +766,7 @@ export const SettingsScreen = () => {
                   elevation: 4,
                 }}
               >
-                <Text style={{ fontSize: 48, color: 'white', fontWeight: 'bold' }}>
+                <Text style={{ color: 'white' }} variant="title" fontVariant={['common-ligatures']} fontSize={48} fontWeight="bold" lineHeight={60}>
                   {name.charAt(0).toUpperCase()}
                 </Text>
               </Box>
