@@ -40,10 +40,11 @@ Want to see a quick walkthrough of the app in action? Play the demo video below 
 <details>
   <summary>Play demo video</summary>
 
-  <video controls width="720">
-    <source src="./demo-video.MP4" type="video/mp4" />
-    Your browser does not support the video tag. You can download or open the video directly here: [demo-video.MP4](./demo-video.MP4)
-  </video>
+   Your browser does not support the video tag. You can download or open the video directly here: [demo-video.MP4](https://drive.google.com/file/d/1lIZWFXEOSUBQVrHZ-q70FTpwQ7EwTbnF/view?usp=share_link)
+
+  <!-- <video controls width="720"> -->
+   <!-- <source src="./demo-video.MP4" type="video/mp4" /> -->
+  <!-- </video> -->
 
 </details>
 
