@@ -32,8 +32,25 @@ async function getNotificationsModule() {
     });
     return Notifications;
   } catch (e) {
-    console.warn('expo-notifications not available:', e);
-    return null;
+    // Dynamic `import()` may fail in some test environments (Node/Jest). Try a
+    // synchronous `require` fallback so tests can mock the module.
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const Notifications = require('expo-notifications');
+      Notifications.setNotificationHandler({
+        handleNotification: async () => ({
+          shouldShowAlert: true,
+          shouldPlaySound: true,
+          shouldSetBadge: false,
+          shouldShowBanner: true,
+          shouldShowList: true,
+        }),
+      });
+      return Notifications;
+    } catch (err) {
+      console.warn('expo-notifications not available:', e);
+      return null;
+    }
   }
 }
 
@@ -83,7 +100,11 @@ export const NotificationService = {
           try {
             notificationId = await Notifications.scheduleNotificationAsync({
               content: { title, body, data: { scheduleBlockId: block.id } },
-              trigger: { seconds, repeats: false } as any,
+              trigger: {
+                type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+                seconds,
+                repeats: false,
+              } as any,
             });
           } catch (e) {
             console.warn('Failed to schedule notification:', e);

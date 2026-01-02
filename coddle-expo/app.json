@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "coddle",
-    "slug": "coddle",
+    "slug": "coddleai",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -29,6 +29,18 @@
     "plugins": [
       "@react-native-community/datetimepicker",
       "expo-sqlite"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "68011e26-e7cd-407a-9869-830efd468cc2"
+      }
+    },
+    "owner": "jaexxxy",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/68011e26-e7cd-407a-9869-830efd468cc2"
+    }
   }
 }
