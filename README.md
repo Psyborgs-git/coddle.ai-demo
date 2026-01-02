@@ -33,6 +33,20 @@ A small Expo React Native app for sleep coaching. This README explains how to in
    - Scan the QR code shown by Expo Dev Tools using the Expo Go app, or
    - Press `a` / `i` in the terminal to open an Android / iOS simulator (if available)
 
+## Demo
+
+Want to see a quick walkthrough of the app in action? Play the demo video below (opens right on GitHub):
+
+<details>
+  <summary>Play demo video</summary>
+
+  <video controls width="720">
+    <source src="./demo-video.MP4" type="video/mp4" />
+    Your browser does not support the video tag. You can download or open the video directly here: [demo-video.MP4](./demo-video.MP4)
+  </video>
+
+</details>
+
 ## Running tests
 
 From the `coddle-expo` directory run:

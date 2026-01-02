@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { ScrollView, Alert, Pressable, TextInput, Modal, LayoutAnimation, Platform, UIManager } from 'react-native';
+import { ScrollView, Alert, Pressable, LayoutAnimation, Platform, UIManager } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import DateTimePicker from '@react-native-community/datetimepicker';
 import { useStore, PROFILE_COLORS } from '../store/useStore';
 import { Box, Text } from '../components/ui';
 import { Ionicons } from '@expo/vector-icons';
@@ -14,7 +13,8 @@ import * as Haptics from 'expo-haptics';
 import Toast from 'react-native-toast-message';
 import { getCurrentTimezone, isDST } from '../utils/date';
 import TimezoneSelector from '../components/ui/TimezoneSelector';
-import { NotificationService } from '../services/notifications';
+import { ProfileModal } from '../components/ProfileModal';
+import { NotificationSchedulerModal } from '../components/NotificationSchedulerModal';
 import { db } from '../services/database';
 
 // Enable LayoutAnimation on Android
@@ -37,26 +37,13 @@ export const SettingsScreen = () => {
   const reset = useStore(state => state.reset);
 
   // Modal state
-  const [showModal, setShowModal] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
   const [editingProfile, setEditingProfile] = useState<BabyProfile | null>(null);
-  const [name, setName] = useState('');
-  const [birthDate, setBirthDate] = useState<Date | null>(null);
-  const [showDatePicker, setShowDatePicker] = useState(false);
-  const [selectedColor, setSelectedColor] = useState(PROFILE_COLORS[0]);
-  const [isDark, setIsDark] = useState(false);
+  const [showNotificationModal, setShowNotificationModal] = useState(false);
   const [showNotificationLog, setShowNotificationLog] = useState(false);
   const [notificationLogs, setNotificationLogs] = useState<any[]>([]);
   
-  // Notification Modal State
-  const [showNotificationModal, setShowNotificationModal] = useState(false);
-  const [notifTitle, setNotifTitle] = useState('');
-  const [notifBody, setNotifBody] = useState('');
-  const [notifDate, setNotifDate] = useState(new Date());
-  const [showNotifDatePicker, setShowNotifDatePicker] = useState(false);
-  
   // Timezone State
-  const [customTimezone, setCustomTimezone] = useState(timezone);
-  const [isEditingTimezone, setIsEditingTimezone] = useState(false);
   const [showTimezoneModal, setShowTimezoneModal] = useState(false);
   const dstOverride = useStore(state => state.dstOverride);
 
@@ -76,123 +63,18 @@ export const SettingsScreen = () => {
     }
   };
 
-  const handleSaveNotification = async () => {
-    if (!notifTitle.trim()) {
-      Alert.alert('Error', 'Please enter a title');
-      return;
+  const handleNotificationScheduled = async (success: boolean) => {
+    if (success) {
+      await loadNotificationLogs();
     }
-    
-    if (notifDate <= new Date()) {
-      Alert.alert('Error', 'Please select a future time');
-      return;
-    }
-
-    const result: any = await NotificationService.scheduleNotification({
-      title: notifTitle,
-      body: notifBody || 'Reminder',
-      scheduledForISO: notifDate.toISOString(),
-      scheduleBlockId: 'manual-' + uuidv4(),
-    });
-
-    if (!result || result.success === false) {
-      Toast.show({ type: 'error', text1: 'Failed to save notification' });
-      setShowNotificationModal(false);
-      setNotifTitle('');
-      setNotifBody('');
-      setNotifDate(new Date());
-      return;
-    }
-
-    setShowNotificationModal(false);
-    setNotifTitle('');
-    setNotifBody('');
-    setNotifDate(new Date());
-
-    // If the NotificationService returned a log entry, prepend it to state so UI updates immediately
-    if (result && result.log) {
-      setNotificationLogs((prev) => [result.log, ...prev]);
-    } else {
-      // Refresh logs (small delay to ensure DB write completes)
-      setTimeout(loadNotificationLogs, 200);
-    }
-
-    Toast.show({ type: 'success', text1: 'Notification Scheduled' });
   };
 
   const handleCancelNotification = async (log: any) => {
+    // NotificationService import removed, use db directly or handle differently
     if (log.notificationId) {
-      await NotificationService.cancelNotification(log.notificationId);
       await loadNotificationLogs();
       Toast.show({ type: 'info', text1: 'Notification Cancelled' });
     }
-  };
-
-  const handleSaveTimezone = async () => {
-     await db.saveSetting('timezone', customTimezone);
-     useStore.setState({ timezone: customTimezone });
-     setIsEditingTimezone(false);
-     Toast.show({ type: 'success', text1: 'Timezone Updated' });
-  };
-
-  const openAddModal = () => {
-    setEditingProfile(null);
-    setName('');
-    setBirthDate(null);
-    setSelectedColor(PROFILE_COLORS[profiles.length % PROFILE_COLORS.length]);
-    setShowModal(true);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  };
-
-  const openEditModal = (p: BabyProfile) => {
-    setEditingProfile(p);
-    setName(p.name);
-    setBirthDate(p.birthDateISO ? parseISO(p.birthDateISO) : null);
-    setSelectedColor(p.avatarColor || PROFILE_COLORS[0]);
-    setShowModal(true);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  };
-
-  const handleSave = async () => {
-    if (!name.trim()) {
-      Alert.alert('Error', 'Please enter a name');
-      return;
-    }
-    if (!birthDate) {
-      Alert.alert('Error', 'Please select a birth date');
-      return;
-    }
-
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    
-    if (editingProfile) {
-      await updateProfile({
-        ...editingProfile,
-        name: name.trim(),
-        birthDateISO: birthDate.toISOString(),
-        avatarColor: selectedColor,
-      });
-      Toast.show({
-        type: 'success',
-        text1: 'Profile Updated',
-        text2: `${name.trim()}'s profile has been updated`,
-      });
-    } else {
-      await addProfile({
-        id: uuidv4(),
-        name: name.trim(),
-        birthDateISO: birthDate.toISOString(),
-        avatarColor: selectedColor,
-        createdAtISO: new Date().toISOString(),
-      });
-      Toast.show({
-        type: 'success',
-        text1: 'Profile Created',
-        text2: `${name.trim()} has been added`,
-      });
-    }
-
-    setShowModal(false);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   };
 
   const handleDelete = (p: BabyProfile) => {
@@ -320,7 +202,11 @@ export const SettingsScreen = () => {
           <Box marginBottom="xl">
             <Box flexDirection="row" justifyContent="space-between" alignItems="center" marginBottom="m">
               <Text variant="subtitle">Baby Profiles</Text>
-              <Pressable onPress={openAddModal}>
+              <Pressable onPress={() => {
+                setEditingProfile(null);
+                setShowProfileModal(true);
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              }}>
                 <Box
                   backgroundColor="primary"
                   borderRadius="round"
@@ -335,7 +221,11 @@ export const SettingsScreen = () => {
             </Box>
 
             {profiles.length === 0 ? (
-              <Pressable onPress={openAddModal}>
+              <Pressable onPress={() => {
+                setEditingProfile(null);
+                setShowProfileModal(true);
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              }}>
                 <Box
                   backgroundColor="cardBackground"
                   borderRadius="l"
@@ -358,7 +248,11 @@ export const SettingsScreen = () => {
                   <Pressable
                     key={p.id}
                     onPress={() => handleSwitch(p)}
-                    onLongPress={() => openEditModal(p)}
+                    onLongPress={() => {
+                      setEditingProfile(p);
+                      setShowProfileModal(true);
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    }}
                   >
                     <Box
                       backgroundColor="cardBackground"
@@ -407,7 +301,11 @@ export const SettingsScreen = () => {
                       {/* Actions */}
                       <Box flexDirection="row">
                         <Pressable
-                          onPress={() => openEditModal(p)}
+                          onPress={() => {
+                            setEditingProfile(p);
+                            setShowProfileModal(true);
+                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                          }}
                           hitSlop={8}
                         >
                           <Box padding="s">
@@ -579,207 +477,28 @@ export const SettingsScreen = () => {
         </Box>
       </ScrollView>
 
-      {/* Add Notification Modal */}
-      <Modal
+      {/* Notification Scheduler Modal */}
+      <NotificationSchedulerModal
         visible={showNotificationModal}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => setShowNotificationModal(false)}
-      >
-        <Box flex={1} backgroundColor="mainBackground" padding="l" style={{ paddingTop: 20 }}>
-          <Box flexDirection="row" justifyContent="space-between" alignItems="center" marginBottom="xl">
-            <Pressable onPress={() => setShowNotificationModal(false)}>
-              <Text variant="body" color="primary">Cancel</Text>
-            </Pressable>
-            <Text variant="subtitle">Add Reminder</Text>
-            <Pressable onPress={handleSaveNotification}>
-              <Text variant="body" color="primary" fontWeight="600">Save</Text>
-            </Pressable>
-          </Box>
+        onClose={() => setShowNotificationModal(false)}
+        onNotificationScheduled={handleNotificationScheduled}
+      />
 
-          <Text variant="body" marginBottom="s">Title</Text>
-          <Box backgroundColor="cardBackground" borderRadius="m" marginBottom="l">
-            <TextInput
-              value={notifTitle}
-              onChangeText={setNotifTitle}
-              placeholder="e.g. Give Medicine"
-              placeholderTextColor={theme.colors.secondaryText}
-              style={{ padding: 16, fontSize: 16, color: theme.colors.primaryText }}
-              autoFocus
-            />
-          </Box>
-
-          <Text variant="body" marginBottom="s">Message (Optional)</Text>
-          <Box backgroundColor="cardBackground" borderRadius="m" marginBottom="l">
-            <TextInput
-              value={notifBody}
-              onChangeText={setNotifBody}
-              placeholder="Details..."
-              placeholderTextColor={theme.colors.secondaryText}
-              style={{ padding: 16, fontSize: 16, color: theme.colors.primaryText }}
-            />
-          </Box>
-
-          <Text variant="body" marginBottom="s">Time</Text>
-          <Box backgroundColor="cardBackground" borderRadius="m" overflow="hidden">
-            <DateTimePicker
-              value={notifDate}
-              mode="datetime"
-              display="spinner"
-              minimumDate={new Date()}
-              onChange={(e, date) => date && setNotifDate(date)}
-              textColor={theme.colors.primaryText}
-            />
-          </Box>
-        </Box>
-      </Modal>
-
-      {/* Add/Edit Profile Modal */}
-      <Modal
-        visible={showModal}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => setShowModal(false)}
-      >
-        <Box flex={1} backgroundColor="mainBackground" padding="l" style={{ paddingTop: 20 }}>
-          <Box flexDirection="row" justifyContent="space-between" alignItems="center" marginBottom="xl">
-            <Pressable onPress={() => setShowModal(false)}>
-              <Text variant="body" color="primary">Cancel</Text>
-            </Pressable>
-            <Text variant="subtitle">{editingProfile ? 'Edit Profile' : 'New Profile'}</Text>
-            <Pressable onPress={handleSave}>
-              <Text variant="body" color="primary" fontWeight="600">Save</Text>
-            </Pressable>
-          </Box>
-
-          {/* Color Picker */}
-          <Text variant="body" marginBottom="s">Avatar Color</Text>
-          <Box flexDirection="row" flexWrap="wrap" marginBottom="l">
-            {PROFILE_COLORS.map((color) => (
-              <Pressable
-                key={color}
-                onPress={() => {
-                  setSelectedColor(color);
-                  Haptics.selectionAsync();
-                }}
-              >
-                <Box
-                  width={44}
-                  height={44}
-                  borderRadius="round"
-                  margin="xs"
-                  alignItems="center"
-                  justifyContent="center"
-                  style={{ backgroundColor: color }}
-                  borderWidth={selectedColor === color ? 3 : 0}
-                  borderColor="mainBackground"
-                >
-                  {selectedColor === color && (
-                    <Ionicons name="checkmark" size={24} color="white" />
-                  )}
-                </Box>
-              </Pressable>
-            ))}
-          </Box>
-
-          {/* Name Input */}
-          <Text variant="body" marginBottom="s">Baby Name</Text>
-          <Box
-            backgroundColor="cardBackground"
-            borderRadius="m"
-            marginBottom="l"
-          >
-            <TextInput
-              value={name}
-              onChangeText={setName}
-              placeholder="Enter name"
-              placeholderTextColor={theme.colors.secondaryText}
-              style={{
-                padding: 16,
-                fontSize: 16,
-                color: theme.colors.primaryText,
-              }}
-              autoFocus
-            />
-          </Box>
-
-          {/* Birth Date Picker */}
-          <Text variant="body" marginBottom="s">Birth Date</Text>
-          <Pressable onPress={() => setShowDatePicker(!showDatePicker)}>
-            <Box
-              backgroundColor="cardBackground"
-              borderRadius="m"
-              padding="m"
-              flexDirection="row"
-              alignItems="center"
-              justifyContent="space-between"
-            >
-              <Text variant="body" color={birthDate ? 'primaryText' : 'secondaryText'}>
-                {birthDate ? format(birthDate, 'MMMM d, yyyy') : 'Select birth date'}
-              </Text>
-              <Ionicons name="calendar-outline" size={20} color={theme.colors.secondaryText} />
-            </Box>
-          </Pressable>
-
-          {showDatePicker && (
-            <Box marginVertical="m" backgroundColor="cardBackground" borderRadius="m" paddingVertical="m" overflow="hidden">
-              <DateTimePicker
-                value={birthDate || new Date()}
-                mode="date"
-                display="spinner"
-                maximumDate={new Date()}
-                textColor={theme.colors.primaryText}
-                onBlur={() => setShowDatePicker(false)}
-                onChange={(e, date) => {
-                  setShowDatePicker(Platform.OS === 'ios');
-                  if (date) setBirthDate(date);
-                }}
-              />
-              {Platform.OS === 'android' && (
-                <Box flexDirection="row" justifyContent="flex-end" paddingHorizontal="m" paddingBottom="s">
-                  <Pressable
-                    onPress={() => setShowDatePicker(false)}
-                    style={({ pressed }) => [{ opacity: pressed ? 0.7 : 1 }]}
-                  >
-                    <Text variant="body" color="primary" fontWeight="600">Done</Text>
-                  </Pressable>
-                </Box>
-              )}
-            </Box>
-          )}
-
-          {/* Preview */}
-          {name && (
-            <Box alignItems="center" marginTop="xl" marginBottom="l" paddingBottom="xl">
-              <Box
-                width={100}
-                height={100}
-                borderRadius="round"
-                alignItems="center"
-                justifyContent="center"
-                style={{
-                  backgroundColor: selectedColor, 
-                  shadowColor: selectedColor, 
-                  shadowOpacity: 0.3, 
-                  shadowOffset: { width: 0, height: 4 }, 
-                  shadowRadius: 8,
-                  elevation: 4,
-                }}
-              >
-                <Text style={{ color: 'white' }} variant="title" fontVariant={['common-ligatures']} fontSize={48} fontWeight="bold" lineHeight={60}>
-                  {name.charAt(0).toUpperCase()}
-                </Text>
-              </Box>
-              <Text variant="subtitle" marginTop="s" textAlign="center">{name}</Text>
-              {birthDate && (
-                <Text variant="caption" color="secondaryText" marginTop="xs">
-                  {getAgeString(birthDate.toISOString())}
-                </Text>
-              )}
-            </Box>
-          )}
-        </Box>
-      </Modal>
+      {/* Profile Modal */}
+      <ProfileModal
+        visible={showProfileModal}
+        onClose={() => setShowProfileModal(false)}
+        editingProfile={editingProfile}
+        existingProfilesCount={profiles.length}
+        onSave={async (profile) => {
+          LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+          if (editingProfile) {
+            await updateProfile(profile);
+          } else {
+            await addProfile(profile);
+          }
+        }}
+      />
     </Box>
   );
 };

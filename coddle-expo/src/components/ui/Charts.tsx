@@ -1,13 +1,10 @@
 import React, { useMemo, useState } from "react";
 import {
 	View,
-	ScrollView,
 	Text,
 	useWindowDimensions,
 	TouchableOpacity,
-	Animated,
 } from "react-native";
-import type { ViewStyle } from "react-native";
 import {
 	VictoryChart,
 	VictoryBar,

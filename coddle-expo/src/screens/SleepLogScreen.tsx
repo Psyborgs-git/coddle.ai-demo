@@ -2,24 +2,17 @@ import React, { useState, useEffect, useMemo } from "react";
 import {
 	ScrollView,
 	StyleSheet,
-	Platform,
-	Modal,
-	Pressable,
 } from "react-native";
 import { useStore } from "../store/useStore";
-import { v4 as uuidv4 } from "uuid";
 import { SleepSession } from "../types";
 import { Box, Text, Button } from "../components/ui";
+import { AddPastSessionModal } from "../components/AddPastSessionModal";
 import * as Haptics from "expo-haptics";
-import DateTimePicker from "@react-native-community/datetimepicker";
 import {
 	differenceInSeconds,
 	differenceInMinutes,
-	differenceInHours,
 	format,
 	parseISO,
-	addDays,
-	subHours,
 } from "date-fns";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@shopify/restyle";
@@ -43,13 +36,7 @@ export const SleepLogScreen = () => {
 
 	const [elapsed, setElapsed] = useState(0);
 	const [awakeElapsed, setAwakeElapsed] = useState(0);
-
-	// Manual Entry State
 	const [showManualModal, setShowManualModal] = useState(false);
-	// Default to a sensible recent session range (1 hour window)
-	const [manualStart, setManualStart] = useState(subHours(new Date(), 1));
-	const [manualEnd, setManualEnd] = useState(new Date());
-	const [notes, setNotes] = useState("");
 
 	// Format durations used in several places (hoisted as a function to avoid use-before-declare errors)
 	function formatDuration(seconds: number) {
@@ -193,359 +180,194 @@ export const SleepLogScreen = () => {
 				});
 			}
 		}
-    };
+	};
 
-		const handleManualSubmit = async () => {
-			// Allow cross-midnight sessions: if end <= start, try advancing end by 1 day
-			let effectiveEnd = manualEnd;
-			if (manualEnd <= manualStart) {
-				const adjusted = addDays(manualEnd, 1);
-				const adjustedDuration = differenceInMinutes(adjusted, manualStart);
-				// If adjusted duration is within max limits and positive, accept it
-				if (
-					adjustedDuration > 0 &&
-					adjustedDuration <=
-						VALIDATION_CONSTRAINTS.MAX_SLEEP_DURATION_HOURS * 60
-				) {
-					effectiveEnd = adjusted;
-					// update state so pickers reflect the adjustment
-					setManualEnd(adjusted);
-					Toast.show({
-						type: "info",
-						text1: "Cross‑midnight detected",
-						text2: "End time assumed to be on the next day",
-						position: "top",
-					});
-				} else {
-					Toast.show({
-						type: "error",
-						text1: "Invalid Time",
-						text2: VALIDATION_MESSAGES.START_BEFORE_END,
-						position: "top",
-					});
-					await Haptics.notificationAsync(
-						Haptics.NotificationFeedbackType.Error
-					);
-					return;
-				}
-			}
+	const handleManualSessionAdd = async (session: SleepSession) => {
+		await addSession(session);
+	};
 
-			if (effectiveEnd > new Date()) {
-				Toast.show({
-					type: "error",
-					text1: "Invalid Time",
-					text2: VALIDATION_MESSAGES.FUTURE_DATE,
-					position: "top",
-				});
-				await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-				return;
-			}
+	return (
+		<Box
+			flex={1}
+			backgroundColor="mainBackground"
+		>
+			<ScrollView contentContainerStyle={styles.container}>
+				<Text
+					variant="header"
+					marginBottom="l"
+				>
+					Sleep Log
+				</Text>
 
-			const durationMinutes = differenceInMinutes(effectiveEnd, manualStart);
-			if (durationMinutes < VALIDATION_CONSTRAINTS.MIN_SLEEP_DURATION_MINUTES) {
-				Toast.show({
-					type: "error",
-					text1: "Too Short",
-					text2: VALIDATION_MESSAGES.MIN_SLEEP,
-					position: "top",
-				});
-				await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-				return;
-			}
+				{/* Timer Card */}
+				<Box
+					backgroundColor={isTimerRunning ? "sleepBedtime" : "cardBackground"}
+					padding="xl"
+					borderRadius="xl"
+					alignItems="center"
+					shadowColor="black"
+					shadowOpacity={0.1}
+					shadowOffset={{ width: 0, height: 4 }}
+					shadowRadius={12}
+					elevation={5}
+					marginBottom="l"
+				>
+					<Box marginBottom="m">
+						<Ionicons
+							name={isTimerRunning ? "moon" : "sunny"}
+							size={64}
+							color={
+								isTimerRunning ? theme.colors.white : theme.colors.warning
+							}
+						/>
+					</Box>
 
-			// Check max duration in minutes to be more precise and avoid rounding issues
-			if (
-				durationMinutes >
-				VALIDATION_CONSTRAINTS.MAX_SLEEP_DURATION_HOURS * 60
-			) {
-				Toast.show({
-					type: "error",
-					text1: "Too Long",
-					text2: VALIDATION_MESSAGES.MAX_SLEEP,
-					position: "top",
-				});
-				await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-				return;
-			}
-
-			const session: SleepSession = {
-				id: uuidv4(),
-				startISO: manualStart.toISOString(),
-				endISO: effectiveEnd.toISOString(),
-				source: "manual",
-				updatedAtISO: new Date().toISOString(),
-				notes,
-			};
-
-			await addSession(session);
-			setShowManualModal(false);
-			setNotes("");
-
-			Toast.show({
-				type: "success",
-				text1: "Session Added",
-				text2: `Logged ${formatDuration(durationMinutes * 60)} of sleep`,
-				position: "top",
-			});
-			await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-		};
-
-		const _openManualEntry = () => {
-			// Reset manual pickers to sensible defaults when opening
-			setManualEnd(new Date());
-			setManualStart(subHours(new Date(), 1));
-			setShowManualModal(true);
-		};
-
-		return (
-			<Box
-				flex={1}
-				backgroundColor="mainBackground"
-			>
-				<ScrollView contentContainerStyle={styles.container}>
 					<Text
 						variant="header"
-						marginBottom="l"
+						color={isTimerRunning ? "white" : "primaryText"}
+						marginBottom="s"
+						style={{ fontVariant: ["tabular-nums"] }}
 					>
-						Sleep Log
+						{isTimerRunning
+							? formatDuration(elapsed)
+							: formatDuration(awakeElapsed)}
 					</Text>
 
-					{/* Timer Card */}
-					<Box
-						backgroundColor={isTimerRunning ? "sleepBedtime" : "cardBackground"}
-						padding="xl"
-						borderRadius="xl"
-						alignItems="center"
-						shadowColor="black"
-						shadowOpacity={0.1}
-						shadowOffset={{ width: 0, height: 4 }}
-						shadowRadius={12}
-						elevation={5}
-						marginBottom="l"
-					>
-						<Box marginBottom="m">
-							<Ionicons
-								name={isTimerRunning ? "moon" : "sunny"}
-								size={64}
-								color={
-									isTimerRunning ? theme.colors.white : theme.colors.warning
-								}
-							/>
-						</Box>
-
-						<Text
-							variant="header"
-							color={isTimerRunning ? "white" : "primaryText"}
-							marginBottom="s"
-							style={{ fontVariant: ["tabular-nums"] }}
-						>
-							{isTimerRunning
-								? formatDuration(elapsed)
-								: formatDuration(awakeElapsed)}
-						</Text>
-
-						<Text
-							variant="body"
-							color={isTimerRunning ? "white" : "secondaryText"}
-							marginBottom="l"
-						>
-							{isTimerRunning ? "Sleeping Soundly" : "Awake & Active"}
-						</Text>
-
-						<Button
-							onPress={handleToggleTimer}
-							style={{
-								backgroundColor: isTimerRunning
-									? theme.colors.white
-									: theme.colors.primary,
-								paddingHorizontal: 48,
-								paddingVertical: 16,
-								borderRadius: 999,
-							}}
-						>
-							<Text
-								variant="subtitle"
-								color={isTimerRunning ? "primary" : "white"}
-								fontWeight="bold"
-							>
-								{isTimerRunning ? "Wake Up" : "Start Sleep"}
-							</Text>
-						</Button>
-					</Box>
-
-					{/* Manual Entry Button */}
-					<Button
-						variant="outline"
-						onPress={_openManualEntry}
-						style={{ marginBottom: 24 }}
-					>
-						<Box
-							flexDirection="row"
-							alignItems="center"
-							justifyContent="center"
-						>
-							<Ionicons
-								name="add-circle-outline"
-								size={20}
-								color={theme.colors.primary}
-								style={{ marginRight: 8 }}
-							/>
-							<Text
-								color="primary"
-								fontWeight="600"
-							>
-								Add Past Session
-							</Text>
-						</Box>
-					</Button>
-
-					{/* Recent Sessions */}
 					<Text
-						variant="title"
-						marginBottom="m"
+						variant="body"
+						color={isTimerRunning ? "white" : "secondaryText"}
+						marginBottom="l"
 					>
-						Recent Sessions
+						{isTimerRunning ? "Sleeping Soundly" : "Awake & Active"}
 					</Text>
-					{sortedSessions.slice(0, 5).map((s) => (
-						<Box
-							key={s.id}
-							backgroundColor="cardBackground"
-							padding="m"
-							borderRadius="m"
-							marginBottom="s"
-							flexDirection="row"
-							alignItems="center"
-							justifyContent="space-between"
-						>
-							<Box
-								flexDirection="row"
-								alignItems="center"
-							>
-								<Box
-									width={40}
-									height={40}
-									borderRadius="round"
-									backgroundColor="primaryLight"
-									alignItems="center"
-									justifyContent="center"
-									marginRight="m"
-								>
-									<Ionicons
-										name="moon"
-										size={20}
-										color={theme.colors.primary}
-									/>
-								</Box>
-								<Box>
-									<Text
-										variant="body"
-										fontWeight="600"
-									>
-										{format(parseISO(s.startISO), "h:mm a")} -{" "}
-										{s.endISO ? format(parseISO(s.endISO), "h:mm a") : "Now"}
-									</Text>
-									<Text variant="caption">
-										{s.endISO
-											? formatDuration(
-													differenceInSeconds(
-														parseISO(s.endISO),
-														parseISO(s.startISO)
-													)
-											  )
-											: "Ongoing"}{" "}
-										• {format(parseISO(s.startISO), "MMM d")}
-									</Text>
-								</Box>
-							</Box>
-							{s.source === "manual" && (
-								<Box
-									backgroundColor="gray100"
-									paddingHorizontal="s"
-									paddingVertical="xs"
-									borderRadius="s"
-								>
-									<Text variant="label">Manual</Text>
-								</Box>
-							)}
-						</Box>
-					))}
-				</ScrollView>
 
-				{/* Manual Entry Modal */}
-				<Modal
-					visible={showManualModal}
-					animationType="slide"
-					presentationStyle="pageSheet"
+					<Button
+						onPress={handleToggleTimer}
+						style={{
+							backgroundColor: isTimerRunning
+								? theme.colors.white
+								: theme.colors.primary,
+							paddingHorizontal: 48,
+							paddingVertical: 16,
+							borderRadius: 999,
+						}}
+					>
+						<Text
+							variant="subtitle"
+							color={isTimerRunning ? "primary" : "white"}
+							fontWeight="bold"
+						>
+							{isTimerRunning ? "Wake Up" : "Start Sleep"}
+						</Text>
+					</Button>
+				</Box>
+
+				{/* Manual Entry Button */}
+				<Button
+					variant="outline"
+					onPress={() => setShowManualModal(true)}
+					style={{ marginBottom: 24 }}
 				>
 					<Box
-						flex={1}
-						padding="l"
-						backgroundColor="mainBackground"
+						flexDirection="row"
+						alignItems="center"
+						justifyContent="center"
+					>
+						<Ionicons
+							name="add-circle-outline"
+							size={20}
+							color={theme.colors.primary}
+							style={{ marginRight: 8 }}
+						/>
+						<Text
+							color="primary"
+							fontWeight="600"
+						>
+							Add Past Session
+						</Text>
+					</Box>
+				</Button>
+
+				{/* Recent Sessions */}
+				<Text
+					variant="title"
+					marginBottom="m"
+				>
+					Recent Sessions
+				</Text>
+				{sortedSessions.slice(0, 5).map((s) => (
+					<Box
+						key={s.id}
+						backgroundColor="cardBackground"
+						padding="m"
+						borderRadius="m"
+						marginBottom="s"
+						flexDirection="row"
+						alignItems="center"
+						justifyContent="space-between"
 					>
 						<Box
 							flexDirection="row"
-							justifyContent="space-between"
 							alignItems="center"
-							marginBottom="l"
 						>
-							<Text variant="header">Add Session</Text>
-							<Pressable onPress={() => setShowManualModal(false)}>
+							<Box
+								width={40}
+								height={40}
+								borderRadius="round"
+								backgroundColor="primaryLight"
+								alignItems="center"
+								justifyContent="center"
+								marginRight="m"
+							>
 								<Ionicons
-									name="close"
-									size={24}
-									color={theme.colors.primaryText}
+									name="moon"
+									size={20}
+									color={theme.colors.primary}
 								/>
-							</Pressable>
+							</Box>
+							<Box>
+								<Text
+									variant="body"
+									fontWeight="600"
+								>
+									{format(parseISO(s.startISO), "h:mm a")} -{" "}
+									{s.endISO ? format(parseISO(s.endISO), "h:mm a") : "Now"}
+								</Text>
+								<Text variant="caption">
+									{s.endISO
+										? formatDuration(
+												differenceInSeconds(
+													parseISO(s.endISO),
+													parseISO(s.startISO)
+												)
+										  )
+										: "Ongoing"}{" "}
+									• {format(parseISO(s.startISO), "MMM d")}
+								</Text>
+							</Box>
 						</Box>
-
-						<Text
-							variant="subtitle"
-							marginBottom="s"
-						>
-							Start Time
-						</Text>
-						<Box
-							backgroundColor="cardBackground"
-							borderRadius="m"
-							marginBottom="m"
-							overflow="hidden"
-						>
-							<DateTimePicker
-								value={manualStart}
-								mode="datetime"
-								display="spinner"
-								onChange={(e, date) => date && setManualStart(date)}
-								textColor={theme.colors.primaryText}
-							/>
-						</Box>
-
-						<Text
-							variant="subtitle"
-							marginBottom="s"
-						>
-							End Time
-						</Text>
-						<Box
-							backgroundColor="cardBackground"
-							borderRadius="m"
-							marginBottom="l"
-							overflow="hidden"
-						>
-							<DateTimePicker
-								value={manualEnd}
-								mode="datetime"
-								display="spinner"
-								onChange={(e, date) => date && setManualEnd(date)}
-								textColor={theme.colors.primaryText}
-							/>
-						</Box>
-
-						<Button onPress={handleManualSubmit}>Save Session</Button>
+						{s.source === "manual" && (
+							<Box
+								backgroundColor="gray100"
+								paddingHorizontal="s"
+								paddingVertical="xs"
+								borderRadius="s"
+							>
+								<Text variant="label">Manual</Text>
+							</Box>
+						)}
 					</Box>
-				</Modal>
-			</Box>
-		);
+				))}
+			</ScrollView>
 
+			{/* Add Past Session Modal */}
+			<AddPastSessionModal
+				visible={showManualModal}
+				onClose={() => setShowManualModal(false)}
+				onSessionAdd={handleManualSessionAdd}
+			/>
+		</Box>
+	);
 };
 
 const styles = StyleSheet.create({

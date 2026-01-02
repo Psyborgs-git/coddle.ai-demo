@@ -34,6 +34,9 @@ export const Button: React.FC<ButtonProps> = ({ variant = 'primary', children, .
 // Card component - simplified
 export const Card = Box;
 
+// Input component
+export { Input } from './Input';
+
 // Export chart components
 export { SimpleBarChart, DateRangeSelector, AreaChart, SimpleLineChart } from './Charts';
 export type { DateRangeOption } from './Charts';
